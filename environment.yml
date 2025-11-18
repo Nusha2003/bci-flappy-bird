@@ -1,0 +1,16 @@
+name: eeg_flappybird
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - mne
+  - numpy
+  - scipy
+  - matplotlib
+  - pyqt
+  - pygame
+  - pylsl
+  - jupyter
+  - pip
+  - pip:
+      - pyautogui
