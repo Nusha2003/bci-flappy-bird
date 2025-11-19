@@ -1,4 +1,3 @@
-# bird.py
 import pygame
 from settings import import_sprite
 
@@ -10,7 +9,7 @@ class Bird(pygame.sprite.Sprite):
         self.animation_delay = 3
         self.jump_move = -9
         # bird animation
-        self.bird_img = import_sprite("./assets/bird")
+        self.bird_img = import_sprite("assets/bird")
         self.image = self.bird_img[self.frame_index]
         self.image = pygame.transform.scale(self.image, (size, size))
         self.rect = self.image.get_rect(topleft = pos)

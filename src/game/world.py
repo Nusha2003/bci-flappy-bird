@@ -10,7 +10,7 @@ class World:
         self.screen = screen
         self.world_shift = 0
         self.current_x = 0
-        self.gravity = 0.5
+        self.gravity = 0.3
         self.current_pipe = None
         self.pipes = pygame.sprite.Group()
         self.player = pygame.sprite.GroupSingle()
@@ -29,17 +29,17 @@ class World:
         self.pipes.add(pipe_top)
         self.pipes.add(pipe_bottom)
         self.current_pipe = pipe_top
+        self.passed = False
 
     # creates the player and the obstacle
     def _generate_world(self):
         self._add_pipe()
         bird = Bird((WIDTH//2 - pipe_size, HEIGHT//2 - pipe_size), 30)
         self.player.add(bird)
-
     # for moving background/obstacle
     def _scroll_x(self):
         if self.playing:
-            self.world_shift = -6
+            self.world_shift = -3
         else:
             self.world_shift = 0
 
@@ -59,14 +59,14 @@ class World:
         else:
             # if player pass through the pipe gaps
             bird = self.player.sprite
-            if bird.rect.x >= self.current_pipe.rect.centerx:
+            if bird.rect.x >= self.current_pipe.rect.centerx and not self.passed:
                 bird.score += 1
                 self.passed = True
     
     # updates the bird's overall state
     def update(self, player_event = None):
         # new pipe adder
-        if self.current_pipe.rect.centerx  <= (WIDTH // 2) - pipe_size:
+        if self.current_pipe.rect.centerx  <= (WIDTH // 5) - pipe_size:
             self._add_pipe()
         # updates, draws pipes
         self.pipes.update(self.world_shift)
