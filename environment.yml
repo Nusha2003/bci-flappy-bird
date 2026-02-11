@@ -9,7 +9,6 @@ dependencies:
   - matplotlib
   - pyqt
   - pygame
-  - pylsl
   - jupyter
   - pip
   - pip:
