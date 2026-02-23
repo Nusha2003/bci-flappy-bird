@@ -1,19 +1,36 @@
 from psychopy import visual, core, event
 import random
+import serial
 
-# --- Configuration ---
-# Doubling the REST and BREAK times to make it "slower"
-REST_TIME = 6.0    # Slower baseline
-READY_TIME = 2.0   # More time to prepare
-FLAP_TIME = 5.0    # Longer window for imagery
-BREAK_TIME = 3.0   # Slower recovery
+
+PORT = 'COM3'
+
+REST_TRIGGER = 1
+READY_TRIGGER = 2
+FLAP_TRIGGER = 3
+BREAK_TRIGGER = 4
+STILL_TRIGGER = 5
+
+#manages serial port connections
+mmbts = serial.Serial()
+mmbts.port = PORT
+mmbts.open()
+
+
+
+
+REST_TIME = 6.0    
+READY_TIME = 2.0   
+FLAP_TIME = 6.0    
+BREAK_TIME = 3.0   
+
 
 n_trials_per_class = 5
 classes = ['Rest', 'Imagine Flap']
 trial_list = classes * n_trials_per_class
 random.shuffle(trial_list)
 
-# --- Window & Stimuli Setup ---
+#represents a window for displaying one or more stimuli
 win = visual.Window(
     size=[1200, 800], 
     fullscr=False, 
@@ -21,67 +38,83 @@ win = visual.Window(
     units="deg", 
     color=[-1, -1, -1] 
 )
-
-# Bird Image (Ensure bird.png is in your directory)
+def send_trigger(code):
+    mmbts.write(bytes([code]))
+    mmbts.flush()
+#text stimuli to be displayed in a window
 bird_img = visual.ImageStim(win, image='/Users/anusha/bci-flappy-bird/task/bird.jpeg', pos=(0, 3), size=(4, 3))
-
 fixation = visual.TextStim(win, text="+", color="white", height=2)
 ready_cue = visual.TextStim(win, text="READY", color="yellow", height=2)
 task_text = visual.TextStim(win, text="", pos=(0, -2), height=2) # Moved down to fit bird
 counter_text = visual.TextStim(win, text="", pos=(10, -7), height=0.7, color="gray")
 
-# --- Instructions ---
+
 intro = visual.TextStim(
     win, 
     text="BCI FLAPPY BIRD CALIBRATION (Slow Mode)\n\n"
          "1. REST: Relax deeply.\n"
          "2. READY: Focus on the screen.\n"
-         "3. TASK: Imagine the feeling of flapping.\n\n"
+         "3. TASK: Imagine the bird flapping vigorously.\n\n"
          "Press any key to start.",
     height=0.8
 )
 
 intro.draw()
+#nothing appears on the screen until you call flip()
+#use callonFlip
 win.flip()
 event.waitKeys()
+timer = core.Clock()
 
-# --- Main Trial Loop ---
+fixation.draw()
+win.callOnFlip(send_trigger, REST_TRIGGER)
+win.flip()
+core.wait(5.0)
+
+
+#reset before the trials start?
+
 for i, trial_type in enumerate(trial_list):
     counter_text.text = f"Trial {i+1}/{len(trial_list)}"
     
-    # 1. REST PHASE (Slower)
-    timer = core.Clock()
-    while timer.getTime() < REST_TIME:
-        fixation.draw()
-        counter_text.draw()
-        win.flip()
-    
-    # 2. READY PHASE (Slower)
-    timer.reset()
-    while timer.getTime() < READY_TIME:
-        ready_cue.draw()
-        counter_text.draw()
-        win.flip()
-    
-    # 3. IMAGINE FLAP PHASE (With Bird Image)
+    #rest phase
+
+    fixation.draw()
+    win.callOnFlip(send_trigger, bytes([REST_TRIGGER]))
+    win.flip()
+
+    core.wait(REST_TIME)
+
+    ready_cue.draw()
+    counter_text.draw()
+    win.callOnFlip(send_trigger, bytes([READY_TRIGGER]))
+    win.flip()
+    core.wait(READY_TIME)
+
+    #imagine flap
     if trial_type == 'Imagine Flap':
         task_text.text = "FLAP"
         task_text.color = "green"
         show_bird = True
+        cue_trigger = FLAP_TRIGGER
     else:
+        #motor inhibition
         task_text.text = "STAY STILL"
         task_text.color = "deepskyblue"
         show_bird = False
+        cue_trigger = STILL_TRIGGER
         
-    timer.reset()
-    while timer.getTime() < FLAP_TIME:
-        if show_bird:
+    if show_bird:
             bird_img.draw()
-        task_text.draw()
-        counter_text.draw()
-        win.flip()
     
-    # 4. BREAK PHASE (Slower)
+    task_text.draw()
+    counter_text.draw()
+    win.callOnFlip(send_trigger, bytes([cue_trigger]))
+    win.flip()
+    core.wait(FLAP_TIME)
+
+
+    win.callOnFlip(send_trigger, bytes([BREAK_TRIGGER]))
     win.flip()
     core.wait(BREAK_TIME)
     
@@ -96,3 +129,4 @@ core.wait(3.0)
 
 win.close()
 core.quit()
+mmbts.close()
