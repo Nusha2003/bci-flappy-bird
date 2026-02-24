@@ -38,11 +38,13 @@ win = visual.Window(
     units="deg", 
     color=[-1, -1, -1] 
 )
+"""
 def send_trigger(code):
     mmbts.write(bytes([code]))
     mmbts.flush()
+    """
 #text stimuli to be displayed in a window
-bird_img = visual.ImageStim(win, image='/Users/anusha/bci-flappy-bird/task/bird.jpeg', pos=(0, 3), size=(4, 3))
+bird_img = visual.ImageStim(win, image=r'C:\Users\winni\Desktop\Neurotech\bci-flappy-bird\task\bird.jpeg', pos=(0, 3), size=(4, 3))
 fixation = visual.TextStim(win, text="+", color="white", height=2)
 ready_cue = visual.TextStim(win, text="READY", color="yellow", height=2)
 task_text = visual.TextStim(win, text="", pos=(0, -2), height=2) # Moved down to fit bird
@@ -67,7 +69,7 @@ event.waitKeys()
 timer = core.Clock()
 
 fixation.draw()
-win.callOnFlip(send_trigger, REST_TRIGGER)
+win.callOnFlip(mmbts.write, REST_TRIGGER)
 win.flip()
 core.wait(5.0)
 
@@ -80,14 +82,14 @@ for i, trial_type in enumerate(trial_list):
     #rest phase
 
     fixation.draw()
-    win.callOnFlip(send_trigger, bytes([REST_TRIGGER]))
+    win.callOnFlip(mmbts.write, bytes([REST_TRIGGER]))
     win.flip()
 
     core.wait(REST_TIME)
 
     ready_cue.draw()
     counter_text.draw()
-    win.callOnFlip(send_trigger, bytes([READY_TRIGGER]))
+    win.callOnFlip(mmbts.write, bytes([READY_TRIGGER]))
     win.flip()
     core.wait(READY_TIME)
 
@@ -109,12 +111,12 @@ for i, trial_type in enumerate(trial_list):
     
     task_text.draw()
     counter_text.draw()
-    win.callOnFlip(send_trigger, bytes([cue_trigger]))
+    win.callOnFlip(mmbts.write, bytes([cue_trigger]))
     win.flip()
     core.wait(FLAP_TIME)
 
 
-    win.callOnFlip(send_trigger, bytes([BREAK_TRIGGER]))
+    win.callOnFlip(mmbts.write, bytes([BREAK_TRIGGER]))
     win.flip()
     core.wait(BREAK_TIME)
     
