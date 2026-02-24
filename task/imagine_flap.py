@@ -3,7 +3,7 @@ import random
 import serial
 
 
-PORT = 'COM3'
+PORT = 'COM6'
 
 REST_TRIGGER = 1
 READY_TRIGGER = 2
@@ -19,13 +19,13 @@ mmbts.open()
 
 
 
-REST_TIME = 6.0    
+REST_TIME = 4.0    
 READY_TIME = 2.0   
 FLAP_TIME = 6.0    
 BREAK_TIME = 3.0   
 
 
-n_trials_per_class = 5
+n_trials_per_class = 30
 classes = ['Rest', 'Imagine Flap']
 trial_list = classes * n_trials_per_class
 random.shuffle(trial_list)
