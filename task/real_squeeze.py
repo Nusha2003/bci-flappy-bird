@@ -7,7 +7,7 @@ PORT = 'COM6'
 
 REST_TRIGGER = 1
 READY_TRIGGER = 2
-FLAP_TRIGGER = 3
+SQUEEZE_TRIGGER = 3
 BREAK_TRIGGER = 4
 STILL_TRIGGER = 5
 
@@ -19,14 +19,14 @@ mmbts.open()
 
 
 
-REST_TIME = 4.0    
+REST_TIME = 2.0    
 READY_TIME = 2.0   
-FLAP_TIME = 6.0    
-BREAK_TIME = 3.0   
+TASK_TIME = 4.0    
+BREAK_TIME = 2.0   
 
 
-n_trials_per_class = 15
-classes = ['Rest', 'Imagine Flap']
+n_trials_per_class = 30
+classes = ['Rest', 'Squeeze']
 trial_list = classes * n_trials_per_class
 random.shuffle(trial_list)
 
@@ -95,11 +95,11 @@ for i, trial_type in enumerate(trial_list):
     core.wait(READY_TIME)
 
     #imagine flap
-    if trial_type == 'Imagine Flap':
-        task_text.text = "FLAP"
+    if trial_type == 'Squeeze':
+        task_text.text = "Squeeze"
         task_text.color = "green"
         #show_bird = True
-        cue_trigger = FLAP_TRIGGER
+        cue_trigger = SQUEEZE_TRIGGER
     else:
         #motor inhibition
         task_text.text = "Stay Still"
@@ -114,7 +114,7 @@ for i, trial_type in enumerate(trial_list):
     counter_text.draw()
     win.callOnFlip(mmbts.write, bytes([cue_trigger]))
     win.flip()
-    core.wait(FLAP_TIME)
+    core.wait(TASK_TIME)
 
 
     win.callOnFlip(mmbts.write, bytes([BREAK_TRIGGER]))

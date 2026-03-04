@@ -11,7 +11,7 @@ from mne_lsl.player import PlayerLSL as Player
 
 set_log_level("WARNING")
 source_id = uuid.uuid4().hex
-fname = "/Users/anusha/bci-flappy-bird/data/S001R01.edf"
+fname = "/Users/anusha/flappy_bird_data/2.23_allyson_squeeze/2_0002_raw.edf"
 player = Player(fname, chunk_size=32, name = "EEG").start()
 print("Player info:", player.info)
 sfreq = player.info["sfreq"]

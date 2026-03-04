@@ -11,7 +11,6 @@ FLAP_TRIGGER = 3
 BREAK_TRIGGER = 4
 STILL_TRIGGER = 5
 
-#manages serial port connections
 mmbts = serial.Serial()
 mmbts.port = PORT
 mmbts.open()
@@ -19,10 +18,10 @@ mmbts.open()
 
 
 
-REST_TIME = 4.0    
+REST_TIME = 2.0    
 READY_TIME = 2.0   
-FLAP_TIME = 6.0    
-BREAK_TIME = 3.0   
+TASK_TIME = 4.0    
+BREAK_TIME = 2.0   
 
 
 n_trials_per_class = 30
@@ -56,7 +55,7 @@ intro = visual.TextStim(
     text="BCI FLAPPY BIRD CALIBRATION (Slow Mode)\n\n"
          "1. REST: Relax deeply.\n"
          "2. READY: Focus on the screen.\n"
-         "3. TASK: Imagine the bird flapping vigorously.\n\n"
+         "3. TASK: Imagine pushing a button to make the bird flap vigourously.\n\n"
          "Press any key to start.",
     height=0.8
 )
@@ -85,7 +84,8 @@ for i, trial_type in enumerate(trial_list):
     win.callOnFlip(mmbts.write, bytes([REST_TRIGGER]))
     win.flip()
 
-    core.wait(REST_TIME)
+    current_rest = REST_TIME + random.uniform(-0.5, 0.5) 
+    core.wait(current_rest)
 
     ready_cue.draw()
     counter_text.draw()
@@ -113,7 +113,7 @@ for i, trial_type in enumerate(trial_list):
     counter_text.draw()
     win.callOnFlip(mmbts.write, bytes([cue_trigger]))
     win.flip()
-    core.wait(FLAP_TIME)
+    core.wait(TASK_TIME)
 
 
     win.callOnFlip(mmbts.write, bytes([BREAK_TRIGGER]))
