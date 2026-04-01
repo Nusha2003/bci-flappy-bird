@@ -25,7 +25,8 @@ class BlinkFlappyWindow(QtWidgets.QMainWindow):
         self.resize(1100, 700)
 
         print("Looking for FakeEEG stream...")
-        streams = pylsl.resolve_byprop("name", "FakeEEG", timeout=10)
+        streams = pylsl.resolve_byprop(prop="name", value='WS-default', timeout=10)
+        print(np.array(streams).shape)
         if not streams:
             raise RuntimeError("No FakeEEG stream found.")
 
@@ -36,7 +37,7 @@ class BlinkFlappyWindow(QtWidgets.QMainWindow):
         )
 
         self.fs = int(self.inlet.info().nominal_srate())
-        self.fp1_index = 21
+        self.fp1_index = 1
         self.buffer_secs = 5
         self.plot_duration = 2
 
@@ -60,7 +61,7 @@ class BlinkFlappyWindow(QtWidgets.QMainWindow):
         main_layout.addLayout(top_bar)
 
         top_bar.addWidget(QtWidgets.QLabel("Blink Threshold (µV):"))
-        self.thresh_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.thresh_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.thresh_slider.setRange(40, 200)
         self.thresh_slider.setValue(int(self.thresh_min))
         self.thresh_slider.valueChanged.connect(self.on_thresh_changed)
@@ -92,11 +93,14 @@ class BlinkFlappyWindow(QtWidgets.QMainWindow):
 
         self.scene = QtWidgets.QGraphicsScene(0, 0, self.game_width, self.game_height)
         self.view = QtWidgets.QGraphicsView(self.scene)
-        self.view.setRenderHints(QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform)
+        self.view.setRenderHints(
+    QtGui.QPainter.RenderHint.Antialiasing |
+    QtGui.QPainter.RenderHint.SmoothPixmapTransform
+)
         split_layout.addWidget(self.view, stretch=1)
 
-        bg_path = "/Users/anusha/bci-flappy-bird/src/game/flappybirdbg.png"
-        bird_path = "/Users/anusha/bci-flappy-bird/src/game/flappybird.png"
+        bg_path = "C:\\Users\\winni\\Desktop\\Neurotech\\bci-flappy-bird\\mvp\\src\\game\\flappybirdbg.png"
+        bird_path = "C:\\Users\\winni\\Desktop\\Neurotech\\bci-flappy-bird\\mvp\\src\\game\\flappybird.png"
 
         self.bg_pix = QtGui.QPixmap(bg_path)
         self.bird_pix = QtGui.QPixmap(bird_path).scaled(

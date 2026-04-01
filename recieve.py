@@ -5,11 +5,12 @@ from datetime import datetime
 
 import pandas as pd
 import pylsl
+import numpy as np
 
 
 DEFAULT_DURATION = 50
 DEFAULT_STREAM_NAME = 'WS-default'
-DEFAULT_OUTPUT_PATH='/Users/anusha/flappy_bird_data'
+DEFAULT_OUTPUT_PATH='C:\\Users\\winni\\Desktop\\Neurotech\\bci-flappy-bird\\mvp'
 
 def find_stream(stream_name: str) -> pylsl.StreamInlet:
     """
@@ -50,11 +51,11 @@ def find_stream(stream_name: str) -> pylsl.StreamInlet:
     dsi_stream_inlet = pylsl.StreamInlet(dsi_stream)
     return dsi_stream_inlet
 
-
+"""
 def receive_data(
     stream: pylsl.StreamInlet, output_path: str, duration: float
 ) -> None:
-    """Python script to record data from Wearable Sensing LSL stream (dsi2lsl).
+    Python script to record data from Wearable Sensing LSL stream (dsi2lsl).
     Records for specified duration and saves CSV to desired path.
 
     Args:
@@ -64,7 +65,7 @@ def receive_data(
 
     Returns:
         None
-    """
+    
     try:
         # Get stream metadata.
         info = stream.info()
@@ -100,6 +101,7 @@ def receive_data(
         # Loop records data for duration, ensures each row is paired.
         while time.time() - start_time < duration:
             samples, timestamps = stream.pull_chunk()
+            print(np.array(samples).shape)
             if samples:
                 for sample, lsl_timestamp in zip(samples, timestamps):
                     row = [sample_counter] + sample + [lsl_timestamp]
@@ -127,7 +129,7 @@ def receive_data(
         print("\nInterrupted by user (Ctrl+C). Exiting gracefully...")
     except Exception as e:
         print(f"Error: {e}")
-
+"""
 
 if __name__ == "__main__":
     """Main entry point for the script to collect data from a DSI stream.
@@ -162,4 +164,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     stream_info = find_stream(args.stream)
-    receive_data(stream_info, args.output, args.duration)
+    while True:
+        samples, timestamps = stream_info.pull_chunk(timeout=1.0)
+        if samples:
+            data=np.array(samples)
+            print("Chunk received:", data.shape)
