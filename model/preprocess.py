@@ -124,8 +124,6 @@ def process_dataset(
         if not os.path.isdir(subj_path):
             continue
 
-        print(f"\n=== Subject {subject} ===")
-
         out_subj = os.path.join(output_root, subject)
         os.makedirs(out_subj, exist_ok=True)
 
@@ -143,7 +141,7 @@ def process_dataset(
                 process_edf(edf_path, out_file)
 
             except Exception as e:
-                print(f"❌ Failed: {file}")
+                print(f"Failed: {file}")
                 print(e)
 
 if __name__ == "__main__":

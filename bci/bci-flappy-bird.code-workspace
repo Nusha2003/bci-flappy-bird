@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../flappy_bird_data"
+		}
+	],
+	"settings": {}
+}

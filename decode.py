@@ -4,7 +4,7 @@ from sklearn.svm import SVC
 from preprocess import EEGData
 
 proc = EEGData()
-data_path = "/Users/anusha/flappy_bird_data/2.24_avishi_squeeze/2_0001_raw.edf"
+data_path = "/Users/anusha/flappy_bird_data/2.23_allyson_squeeze/2_0002_raw.edf"
 X, y = proc.load_and_process(data_path)
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
