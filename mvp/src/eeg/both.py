@@ -25,9 +25,9 @@ class BlinkFlappyWindow(QtWidgets.QMainWindow):
         self.resize(1100, 700)
 
         print("Looking for FakeEEG stream...")
-        streams = pylsl.resolve_byprop("name", "FakeEEG", timeout=10)
-        if not streams:
-            raise RuntimeError("No FakeEEG stream found.")
+        streams = pylsl.resolve_byprop("name", "WS-default", timeout=10)
+        
+      
 
         self.inlet = pylsl.StreamInlet(
             streams[0],
@@ -36,7 +36,7 @@ class BlinkFlappyWindow(QtWidgets.QMainWindow):
         )
 
         self.fs = int(self.inlet.info().nominal_srate())
-        self.fp1_index = 21
+        self.fp1_index = 1
         self.buffer_secs = 5
         self.plot_duration = 2
 
