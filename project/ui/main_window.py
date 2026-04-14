@@ -1,5 +1,5 @@
 # ui/main_window.py
-
+"""
 import time
 import numpy as np
 from collections import deque
@@ -7,10 +7,10 @@ from pathlib import Path
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 
-from project.eeg.stream import EEGStream
-from project.eeg.preprocess import preprocess
-from project.eeg.jaw_clench_detector import JawClenchDetector
-from project.game.flappy import Bird
+from eeg.stream import EEGStream
+from eeg.preprocess import preprocess
+from eeg.blink_detector import BlinkDetector
+from game.flappy import Bird
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     window.show()
     sys.exit(app.exec())
 """
-if then jaw clench, hand clench, blinks
+
 # ui/main_window.py
 
 import numpy as np
@@ -263,6 +263,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.game_timer = QtCore.QTimer()
         self.game_timer.timeout.connect(self.update_game)
         self.game_timer.start(16)
+        self.calibrating = True
+        self.calibration_data = []
+        self.calibration_duration = 5  # seconds
+        self.calibration_start_time = None
+        self.calibration_start_time = None
+        self.label.setText("Calibration: Blink 5–10 times...")
     def _setup_ui(self):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -337,6 +343,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.buffer.append(v)
             self.time_buffer.append(t)
 
+            # collect calibration data
+            if self.calibrating:
+                self.calibration_data.append(v)
+
         if len(self.buffer) < self.stream.fs:
             return
 
@@ -349,28 +359,48 @@ class MainWindow(QtWidgets.QMainWindow):
         rel_time = times - times[-1]
         self.curve.setData(rel_time, signal)
 
+        if self.calibrating:
+            if self.calibration_start_time is None:
+                self.calibration_start_time = ts[-1]
+
+            elapsed = ts[-1] - self.calibration_start_time
+
+            if elapsed >= self.calibration_duration:
+                print("Running calibration...")
+
+                calib_signal = preprocess(
+                    np.array(self.calibration_data),
+                    self.stream.fs
+                )
+
+                success = self.detector.calibrate(calib_signal)
+
+                if success:
+                    self.calibrating = False
+                    self.label.setText("Calibration complete! Start blinking to play")
+                else:
+                    self.label.setText("Calibration failed, try again")
+                    self.calibration_data = []
+                    self.calibration_start_time = ts[-1]
+
+            return 
+
         peaks, blinks = self.detector.detect(signal, times, self.thresh_min)
 
         if blinks:
-            self.jaw_count += len(blinks)
+            self.blink_count += len(blinks)
             self.label.setText(f"Blinks: {self.blink_count}")
             self.bird.jump()
 
-    # -------------------------
-    # Game Loop
-    # -------------------------
     def update_game(self):
         self.bird.update()
 
-        # Clamp
         if self.bird.y < 0:
             self.bird.y = 0
         if self.bird.y > 640:
             self.bird.y = 640
 
-        # Rotation (adds game feel)
         angle = max(-30, min(60, self.bird.vel * 3))
         self.bird_item.setRotation(angle)
 
         self.bird_item.setPos(self.bird_x, self.bird.y) 
-"""

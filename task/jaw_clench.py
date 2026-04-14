@@ -2,7 +2,7 @@ from psychopy import visual, core, event
 import serial
 import time
 
-PORT = 'COM8'
+PORT = 'COM3'
 CLENCH_TRIGGER = 10  
 DURATION_MINS = 2
 TOTAL_SECONDS = DURATION_MINS * 60

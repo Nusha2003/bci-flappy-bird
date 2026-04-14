@@ -1,2 +1,14 @@
 mvp/dat
 data/
+
+psychopy-env/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS stuff
+.DS_Store
+Thumbs.db
