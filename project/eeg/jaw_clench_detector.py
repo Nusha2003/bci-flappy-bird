@@ -1,113 +1,126 @@
 # eeg/jaw_clench_detector.py
-
 import time
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
-
 import numpy as np
 from scipy.signal import butter, filtfilt, find_peaks
-
-try:
-    import pylsl
-except Exception:
-    pylsl = None
+import pylsl
 
 
-@dataclass
 class JawClenchDetector:
-    fs: float
-    lowcut: float = 20.0
-    highcut: float = 45.0
-    refractory: float = 1.0
-    merge_tol: float = 0.05
-    history_seconds: float = 2.0
-    min_height: float = 0.0
+    def __init__(self, fs):
+        self.fs = fs
+        self.recent_clenches = []
+        self.refractory = 0.35
+        self.last_clench_time = 0
+        self.merge_tol = 0.06
 
-    recent_clenches: List[float] = field(default_factory=list)
-    last_clench_time: float = 0.0
+        self.baseline_window = []
+        self.baseline_size = int(5 * fs)
 
-    def bandpass(self, signal: np.ndarray) -> np.ndarray:
-        signal = np.asarray(signal, dtype=float)
-        if signal.size < 5:
-            return signal
+    def _bandpass(self, signal, lowcut, highcut):
+        x = np.asarray(signal, dtype=float)
+        if x.size < 20:
+            return x
 
         nyq = 0.5 * self.fs
-        low = max(self.lowcut / nyq, 1e-4)
-        high = min(self.highcut / nyq, 0.9999)
+        low = max(lowcut / nyq, 1e-4)
+        high = min(highcut / nyq, 0.9999)
         if low >= high:
-            return signal
+            return x
 
         b, a = butter(4, [low, high], btype="band")
-        return filtfilt(b, a, signal)
+        padlen = 3 * max(len(a), len(b))
+        if x.size <= padlen:
+            return x
 
-    def envelope(self, signal: np.ndarray, window_s: float = 0.05) -> np.ndarray:
+        return filtfilt(b, a, x)
+
+    def _envelope(self, signal, window_s=0.05):
         x = np.asarray(signal, dtype=float)
         n = max(int(window_s * self.fs), 1)
+
         if x.size < n:
-            return np.sqrt(np.mean(x**2)) * np.ones_like(x)
+            return np.sqrt(np.mean(x ** 2)) * np.ones_like(x)
 
         kernel = np.ones(n, dtype=float) / n
-        power = np.convolve(x**2, kernel, mode="same")
+        power = np.convolve(x ** 2, kernel, mode="same")
         return np.sqrt(np.maximum(power, 0.0))
 
-    def features(self, signal: np.ndarray) -> dict:
-        x = np.asarray(signal, dtype=float)
-        return {
-            "rms": float(np.sqrt(np.mean(x**2))) if x.size else 0.0,
-            "ptp": float(np.ptp(x)) if x.size else 0.0,
-            "std": float(np.std(x)) if x.size else 0.0,
-            "mean_abs": float(np.mean(np.abs(x))) if x.size else 0.0,
-        }
-
-    def detect(
-        self,
-        signal: np.ndarray,
-        timestamps: np.ndarray,
-        thresh_min: Optional[float] = None,
-    ) -> Tuple[np.ndarray, List[float], dict]:
-        x = np.asarray(signal, dtype=float)
-        t = np.asarray(timestamps, dtype=float)
-        if x.size != t.size:
-            raise ValueError("signal and timestamps must have the same length")
+    def _robust_stats(self, x):
+        x = np.asarray(x, dtype=float)
         if x.size == 0:
-            return np.array([], dtype=int), [], {"threshold": 0.0, "features": {}}
+            return 0.0, 1.0
 
-        filtered = self.bandpass(x)
-        env = self.envelope(filtered)
+        med = float(np.median(x))
+        mad = float(np.median(np.abs(x - med)))
+        scale = 1.4826 * mad
 
-        spread = np.percentile(env, 95) - np.percentile(env, 5)
-        absolute_min = self.min_height if thresh_min is None else thresh_min
-        thresh = max(spread * 0.8, absolute_min)
+        if not np.isfinite(scale) or scale <= 1e-12:
+            scale = float(np.std(x))
+        if not np.isfinite(scale) or scale <= 1e-12:
+            scale = 1.0
 
-        peaks, props = find_peaks(
-            env,
-            height=thresh,
-            distance=max(int(0.20 * self.fs), 1),
-            prominence=max(thresh * 0.25, 1e-6),
+        return med, scale
+
+    def detect(self, signal, timestamps, thresh_min):
+        signal = np.asarray(signal, dtype=float)
+        timestamps = np.asarray(timestamps, dtype=float)
+
+        if signal.size == 0:
+            return np.array([], dtype=int), [], {
+                "threshold": 0.0,
+                "n_peaks": 0,
+                "peak_heights": [],
+            }
+
+        # Jaw band
+        jaw_band = self._bandpass(signal, 20.0, 45.0)
+
+        # Rectify and smooth into an energy envelope
+        jaw_env = self._envelope(jaw_band)
+
+        # Keep a running baseline so idle noise does not trigger constantly
+        self.baseline_window.extend(jaw_env.tolist())
+        if len(self.baseline_window) > self.baseline_size:
+            self.baseline_window = self.baseline_window[-self.baseline_size:]
+
+        base_med, base_scale = self._robust_stats(self.baseline_window)
+
+        # Easier than the previous version, but still needs a real burst
+        thresh = max(
+            base_med + 1.8 * base_scale,
+            float(np.percentile(jaw_env, 88)),
+            float(thresh_min),
         )
 
-        new_clenches: List[float] = []
+        peaks, props = find_peaks(
+            jaw_env,
+            height=thresh,
+            width=(int(0.02 * self.fs), int(0.30 * self.fs)),
+            distance=int(0.15 * self.fs),
+            prominence=max(thresh * 0.06, 1e-6),
+        )
+
+        new_clenches = []
         now = time.time()
+
         for p in peaks:
-            ts = float(t[p])
-            if any(abs(ts - prev) < self.merge_tol for prev in self.recent_clenches):
+            t = float(timestamps[p])
+
+            if any(abs(t - prev) < self.merge_tol for prev in self.recent_clenches):
                 continue
+
             if now - self.last_clench_time < self.refractory:
                 continue
 
             self.last_clench_time = now
-            self.recent_clenches.append(ts)
-            new_clenches.append(ts)
+            self.recent_clenches.append(t)
+            new_clenches.append(t)
 
-        if pylsl is not None:
-            now_lsl = pylsl.local_clock()
-            self.recent_clenches = [ts for ts in self.recent_clenches if now_lsl - ts < self.history_seconds]
-        else:
-            self.recent_clenches = self.recent_clenches[-25:]
+        now_lsl = pylsl.local_clock()
+        self.recent_clenches = [t for t in self.recent_clenches if now_lsl - t < 2]
 
         info = {
             "threshold": float(thresh),
-            "features": self.features(env),
             "n_peaks": int(len(peaks)),
             "peak_heights": props.get("peak_heights", np.array([])).tolist() if len(peaks) else [],
         }
