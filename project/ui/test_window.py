@@ -57,7 +57,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1100, 700)
 
         self.mode = None
-
         self._select_screen = ModeSelectScreen()
         self._select_screen.mode_selected.connect(self._on_mode_selected)
         self.setCentralWidget(self._select_screen)
@@ -71,7 +70,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bird = Bird(y=300)
 
         self.fp1_index = 1
-        self.thresh_min = 70.0 if self.mode == 1 else 0.1
+
+        # Separate thresholds for the two control modes.
+        # Blink mode can stay fairly sensitive.
+        self.blink_thresh_min = 70.0
+
+        # Jaw mode should be higher so blinks do not trigger clenches.
+        # If this is still too sensitive, raise it to 50-60.
+        self.jaw_thresh_min = 45.0
 
         self.buffer = deque(maxlen=int(self.stream.fs * 5))
         self.time_buffer = deque(maxlen=int(self.stream.fs * 5))
@@ -93,7 +99,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.jump_interval = 0.18
         self.hold_seconds = 0.35
 
-        # Brief block after a blink-like event in jaw mode
+        # Brief block after blink-like activity in jaw mode
         self.jaw_block_until = 0.0
         self.jaw_block_seconds = 0.25
 
@@ -322,14 +328,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.calibration_start_time is None:
             self.calibration_start_time = times[-1]
 
-        # Live feedback during calibration
         if self.mode == 1:
-            _, events = self.detector.detect(signal, times, self.thresh_min)
+            _, events = self.detector.detect(signal, times, self.blink_thresh_min)
         else:
             if blink_events:
                 events = []
             else:
-                _, events, _ = self.detector.detect(signal, times, self.thresh_min)
+                _, events, _ = self.detector.detect(signal, times, self.jaw_thresh_min)
 
         if events:
             self.calib_detected += len(events)
@@ -365,7 +370,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
 
     def _handle_blink(self, signal, times):
-        _, blinks = self.detector.detect(signal, times, self.thresh_min)
+        _, blinks = self.detector.detect(signal, times, self.blink_thresh_min)
         if blinks:
             self.event_count += len(blinks)
             self.label.setText(f"Blinks: {self.event_count}")
@@ -374,6 +379,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _handle_jaw(self, signal, times, blink_events=None):
         now = time.monotonic()
 
+        # If a blink-like event is present, briefly ignore jaw detections.
         if blink_events:
             self.jaw_block_until = now + self.jaw_block_seconds
             return
@@ -381,7 +387,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if now < self.jaw_block_until:
             return
 
-        _, clenches, _ = self.detector.detect(signal, times, self.thresh_min)
+        _, clenches, _ = self.detector.detect(signal, times, self.jaw_thresh_min)
         if clenches:
             self.event_count += len(clenches)
             self.label.setText(f"Jaw clenches: {self.event_count}")
