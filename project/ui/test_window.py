@@ -22,7 +22,6 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setStyleSheet("background-color: #1a1a2e;")
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setAlignment(QtCore.Qt.AlignCenter)
