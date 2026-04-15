@@ -1,5 +1,3 @@
-# ui/main_window.py
-
 import time
 import numpy as np
 from collections import deque
@@ -39,13 +37,11 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
         btn_blink = QtWidgets.QPushButton("Eye Blink")
         btn_blink.setFixedSize(220, 64)
-        
         btn_blink.clicked.connect(lambda: self.mode_selected.emit(1))
         layout.addWidget(btn_blink, alignment=QtCore.Qt.AlignCenter)
 
         btn_jaw = QtWidgets.QPushButton("Jaw Clench")
         btn_jaw.setFixedSize(220, 64)
-        
         btn_jaw.clicked.connect(lambda: self.mode_selected.emit(2))
         layout.addWidget(btn_jaw, alignment=QtCore.Qt.AlignCenter)
 
@@ -82,29 +78,39 @@ class MainWindow(QtWidgets.QMainWindow):
         self.time_buffer = deque(maxlen=int(self.stream.fs * 5))
         self.plot_duration = 2
 
-        self.event_count = 0  # blinks or clenches detected total
+        self.event_count = 0
 
         # Calibration state
         self.calibrating = True
         self.calibration_data = []
         self.calibration_duration = 5
         self.calibration_start_time = None
-        self.calib_dot_count = 0       # dots shown in label (0–5 cycling)
-        self.calib_detected = 0        # events detected during calibration
-        self.last_dot_time = 0.0
+        self.calib_dot_count = 0
+        self.calib_detected = 0
 
         # Jaw hold-to-jump state (mode 2 only)
         self.clench_hold_until = 0.0
         self.last_jump_time = 0.0
-        self.jump_interval = 0.18
-        self.hold_seconds = 0.35
+        self.jump_interval = 0.22
+        self.hold_seconds = 0.30
 
+        # Extra jaw anti-blink protection
+        self.jaw_block_until = 0.0
+        self.jaw_block_seconds = 0.55
+        self.jaw_confirm_seconds = 0.18
+        self.jaw_candidate_since = None
+
+        # Blink veto detector only used in jaw mode
         if self.mode == 1:
             self.detector = BlinkDetector(self.stream.fs)
+            self.blink_veto_detector = None
             self.setWindowTitle("EEG Eye Blink Flappy Bird")
         else:
             self.detector = JawClenchDetector(self.stream.fs)
+            self.blink_veto_detector = BlinkDetector(self.stream.fs)
             self.setWindowTitle("EEG Jaw Clench Flappy Bird")
+
+        self.blink_veto_thresh = 70.0
 
         self._setup_game_ui()
         self._update_calib_label()
@@ -182,7 +188,8 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         ]:
             try:
-                fn(); break
+                fn()
+                break
             except Exception:
                 pass
 
@@ -193,7 +200,8 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         ]:
             try:
-                fn(); break
+                fn()
+                break
             except Exception:
                 pass
 
@@ -245,6 +253,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # Calibration label helpers
     # ------------------------------------------------------------------
 
+    def _calibration_instruction(self):
+        if self.mode == 1:
+            return "Blink once or twice when prompted; keep your jaw relaxed."
+        return "Clench steadily when prompted; try not to blink during calibration."
+
     def _tick_dots(self):
         """Called every 500 ms to animate the '...' in the calibration label."""
         if self.calibrating:
@@ -253,14 +266,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_calib_label(self):
         dots = "." * self.calib_dot_count
-        pad = " " * (3 - self.calib_dot_count)  # keep label width stable
+        pad = " " * (3 - self.calib_dot_count)
+        instruction = self._calibration_instruction()
+
         if self.mode == 1:
             self.label.setText(
-                f"Calibrating blinks{dots}{pad}  — blinks detected: {self.calib_detected}"
+                f"Calibrating blinks{dots}{pad}  — blinks detected: {self.calib_detected}  |  {instruction}"
             )
         else:
             self.label.setText(
-                f"Calibrating jaw clenches{dots}{pad}  — clenches detected: {self.calib_detected}"
+                f"Calibrating jaw clenches{dots}{pad}  — clenches detected: {self.calib_detected}  |  {instruction}"
             )
 
     # ------------------------------------------------------------------
@@ -277,8 +292,6 @@ class MainWindow(QtWidgets.QMainWindow):
         for v, t in zip(fp1, ts):
             self.buffer.append(v)
             self.time_buffer.append(t)
-            if self.calibrating:
-                self.calibration_data.append(v)
 
         if len(self.buffer) < int(self.stream.fs):
             return
@@ -290,21 +303,35 @@ class MainWindow(QtWidgets.QMainWindow):
         signal = preprocess(data, self.stream.fs)
         self.curve.setData(times - times[-1], signal)
 
+        blink_events = []
+        blink_like = False
+
+        if self.mode == 2 and self.blink_veto_detector is not None:
+            _, blink_events = self.blink_veto_detector.detect(
+                signal, times, self.blink_veto_thresh
+            )
+            blink_like = len(blink_events) > 0 or self._looks_like_blink(signal)
+
         if self.calibrating:
-            self._run_calibration(signal, times)
+            if self.mode == 1:
+                self.calibration_data.extend(fp1.tolist())
+            else:
+                if not blink_like:
+                    self.calibration_data.extend(fp1.tolist())
+
+            self._run_calibration(signal, times, blink_like)
             return
 
-        # Post-calibration detection — only one motor drives the jump
         if self.mode == 1:
             self._handle_blink(signal, times)
         else:
-            self._handle_jaw(signal, times)
+            self._handle_jaw(signal, times, blink_like)
 
     # ------------------------------------------------------------------
     # Shared calibration
     # ------------------------------------------------------------------
 
-    def _run_calibration(self, signal, times):
+    def _run_calibration(self, signal, times, blink_like=False):
         if self.calibration_start_time is None:
             self.calibration_start_time = times[-1]
 
@@ -312,7 +339,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.mode == 1:
             _, events = self.detector.detect(signal, times, self.thresh_min)
         else:
-            _, events, _ = self.detector.detect(signal, times, self.thresh_min)
+            if blink_like:
+                events = []
+            else:
+                _, events, _ = self.detector.detect(signal, times, self.thresh_min)
 
         if events:
             self.calib_detected += len(events)
@@ -323,6 +353,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         # Time's up — run the appropriate calibration
+        if len(self.calibration_data) < max(10, int(self.stream.fs * 0.5)):
+            self.calibration_data = []
+            self.calibration_start_time = times[-1]
+            self.calib_detected = 0
+            self.calib_dot_count = 0
+            self.label.setText(
+                f"Calibration failed — not enough clean data.  |  {self._calibration_instruction()}"
+            )
+            return
+
         calib_signal = preprocess(np.array(self.calibration_data), self.stream.fs)
 
         success = False
@@ -336,9 +376,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.dot_timer.stop()
             self.calib_detected = 0
             if self.mode == 1:
-                self.label.setText("Calibration complete! Blink to flap.")
+                self.label.setText(
+                    f"Calibration complete! Blink to flap.  |  {self._calibration_instruction()}"
+                )
             else:
-                self.label.setText("Calibration complete! Clench to flap.")
+                self.label.setText(
+                    f"Calibration complete! Clench to flap.  |  {self._calibration_instruction()}"
+                )
         else:
             # Reset and retry
             self.calibration_data = []
@@ -346,9 +390,37 @@ class MainWindow(QtWidgets.QMainWindow):
             self.calib_detected = 0
             self.calib_dot_count = 0
             if self.mode == 1:
-                self.label.setText("Calibration failed — blink more clearly, retrying...")
+                self.label.setText(
+                    f"Calibration failed — blink more clearly, retrying...  |  {self._calibration_instruction()}"
+                )
             else:
-                self.label.setText("Calibration failed — clench more firmly, retrying...")
+                self.label.setText(
+                    f"Calibration failed — clench more firmly, retrying...  |  {self._calibration_instruction()}"
+                )
+
+    # ------------------------------------------------------------------
+    # Detection helpers
+    # ------------------------------------------------------------------
+
+    def _looks_like_blink(self, signal):
+        """
+        Heuristic blink veto for jaw mode.
+        Blinks tend to be sharp, brief, high-derivative spikes.
+        """
+        x = np.asarray(signal, dtype=float)
+        if x.size < 8:
+            return False
+
+        tail_n = max(8, int(self.stream.fs * 0.25))
+        x = x[-tail_n:]
+
+        std = float(np.std(x)) + 1e-6
+        diff = np.abs(np.diff(x))
+        sharpness = float(np.max(diff)) / std if diff.size else 0.0
+        peak = float(np.max(np.abs(x - np.mean(x)))) / std
+
+        # Tight enough to reject blink spikes, but still allow broader jaw artifacts.
+        return sharpness > 4.0 and peak > 4.0
 
     # ------------------------------------------------------------------
     # Detection handlers (post-calibration)
@@ -361,12 +433,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self.label.setText(f"Blinks: {self.event_count}")
             self.bird.jump()
 
-    def _handle_jaw(self, signal, times):
+    def _handle_jaw(self, signal, times, blink_like=False):
+        now = time.monotonic()
+
+        # If a blink-like artifact is present, temporarily ignore jaw detections.
+        if blink_like:
+            self.jaw_block_until = now + self.jaw_block_seconds
+            self.jaw_candidate_since = None
+            return
+
+        if now < self.jaw_block_until:
+            return
+
         _, clenches, _ = self.detector.detect(signal, times, self.thresh_min)
+
         if clenches:
+            # Require the clench to persist for a short time before we flap.
+            if self.jaw_candidate_since is None:
+                self.jaw_candidate_since = now
+                return
+
+            if (now - self.jaw_candidate_since) < self.jaw_confirm_seconds:
+                return
+
             self.event_count += len(clenches)
             self.label.setText(f"Jaw clenches: {self.event_count}")
-            self.clench_hold_until = time.monotonic() + self.hold_seconds
+            self.clench_hold_until = now + self.hold_seconds
+            self.jaw_candidate_since = None
+        else:
+            self.jaw_candidate_since = None
 
     # ------------------------------------------------------------------
     # Game loop
