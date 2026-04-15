@@ -1,4 +1,4 @@
-# ui/test_window.py
+# ui/main_window.py
 
 import time
 import numpy as np
@@ -15,16 +15,89 @@ from eeg.jaw_clench_detector import JawClenchDetector
 from game.flappy import Bird
 
 
-class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, mode: int = 1):
+class ModeSelectScreen(QtWidgets.QWidget):
+    """Splash screen shown before the game. Emits mode_selected(int) on choice."""
+
+    mode_selected = QtCore.pyqtSignal(int)
+
+    def __init__(self):
         super().__init__()
+        self.setStyleSheet("background-color: #1a1a2e;")
 
-        self.mode = mode
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setAlignment(QtCore.Qt.AlignCenter)
+        layout.setSpacing(24)
 
-        title_map = {1: "EEG Eye Blink Flappy Bird", 2: "EEG Jaw Clench Flappy Bird"}
-        self.setWindowTitle(title_map.get(mode, "EEG Flappy Bird"))
+        title = QtWidgets.QLabel("BCI Flappy Bird")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("color: #e0e0ff; font-size: 32px; font-weight: bold;")
+        layout.addWidget(title)
+
+        subtitle = QtWidgets.QLabel("Choose your control method")
+        subtitle.setAlignment(QtCore.Qt.AlignCenter)
+        subtitle.setStyleSheet("color: #8888aa; font-size: 16px;")
+        layout.addWidget(subtitle)
+
+        layout.addSpacing(16)
+
+        btn_blink = QtWidgets.QPushButton("Eye Blink")
+        btn_blink.setFixedSize(220, 64)
+        btn_blink.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3aff;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                border-radius: 12px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #5555ff; }
+            QPushButton:pressed { background-color: #2222cc; }
+        """)
+        btn_blink.clicked.connect(lambda: self.mode_selected.emit(1))
+        layout.addWidget(btn_blink, alignment=QtCore.Qt.AlignCenter)
+
+        btn_jaw = QtWidgets.QPushButton("Jaw Clench")
+        btn_jaw.setFixedSize(220, 64)
+        btn_jaw.setStyleSheet("""
+            QPushButton {
+                background-color: #ff5533;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                border-radius: 12px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #ff7755; }
+            QPushButton:pressed { background-color: #cc3311; }
+        """)
+        btn_jaw.clicked.connect(lambda: self.mode_selected.emit(2))
+        layout.addWidget(btn_jaw, alignment=QtCore.Qt.AlignCenter)
+
+        hint = QtWidgets.QLabel("Blink to flap  ·  Clench to flap")
+        hint.setAlignment(QtCore.Qt.AlignCenter)
+        hint.setStyleSheet("color: #555577; font-size: 13px;")
+        layout.addWidget(hint)
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("BCI Flappy Bird")
         self.resize(1100, 700)
 
+        self.mode = None  # set after mode select screen
+
+        # Show mode select first
+        self._select_screen = ModeSelectScreen()
+        self._select_screen.mode_selected.connect(self._on_mode_selected)
+        self.setCentralWidget(self._select_screen)
+
+    def _on_mode_selected(self, mode: int):
+        self.mode = mode
+        self._init_game()
+
+    def _init_game(self):
         self.stream = EEGStream()
         self.bird = Bird(y=300)
 
@@ -35,16 +108,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.time_buffer = deque(maxlen=int(self.stream.fs * 5))
         self.plot_duration = 2
 
-        self.blink_count = 0
-        self.jaw_count = 0
+        self.event_count = 0  # blinks or clenches detected total
 
-        # --- Unified calibration state ---
-        self.calibrating = True          # always calibrate, regardless of mode
+        # Calibration state
+        self.calibrating = True
         self.calibration_data = []
-        self.calibration_duration = 5    # seconds
+        self.calibration_duration = 5
         self.calibration_start_time = None
+        self.calib_dot_count = 0       # dots shown in label (0–5 cycling)
+        self.calib_detected = 0        # events detected during calibration
+        self.last_dot_time = 0.0
 
-        # Jaw clench hold-to-jump state
+        # Jaw hold-to-jump state (mode 2 only)
         self.clench_hold_until = 0.0
         self.last_jump_time = 0.0
         self.jump_interval = 0.18
@@ -52,20 +127,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self.mode == 1:
             self.detector = BlinkDetector(self.stream.fs)
+            self.setWindowTitle("EEG Eye Blink Flappy Bird")
         else:
             self.detector = JawClenchDetector(self.stream.fs)
+            self.setWindowTitle("EEG Jaw Clench Flappy Bird")
 
-        self._setup_ui()
+        self._setup_game_ui()
+        self._update_calib_label()
 
-        calib_prompt = {
-            1: "Calibration: Blink 5–10 times naturally...",
-            2: "Calibration: Clench your jaw 3–5 times...",
-        }
-        self.label.setText(calib_prompt.get(self.mode, "Calibrating..."))
+        self.eeg_timer = QtCore.QTimer()
+        self.eeg_timer.timeout.connect(self.update_loop)
+        self.eeg_timer.start(20)
 
-        self.timer = QtCore.QTimer()
-        self.timer.timeout.connect(self.update_loop)
-        self.timer.start(20)
+        self.dot_timer = QtCore.QTimer()
+        self.dot_timer.timeout.connect(self._tick_dots)
+        self.dot_timer.start(500)
 
         self.game_timer = QtCore.QTimer()
         self.game_timer.timeout.connect(self.update_game)
@@ -96,10 +172,10 @@ class MainWindow(QtWidgets.QMainWindow):
         return fallback
 
     # ------------------------------------------------------------------
-    # UI setup
+    # Game UI
     # ------------------------------------------------------------------
 
-    def _setup_ui(self):
+    def _setup_game_ui(self):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
@@ -117,33 +193,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scene.setSceneRect(0, 0, 360, 640)
         self.view = QtWidgets.QGraphicsView(self.scene)
 
-        try:
-            self.view.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            self.view.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
-        except Exception:
-            pass
+        for fn in [
+            lambda: self.view.setRenderHint(QtGui.QPainter.Antialiasing, True),
+        ]:
+            try:
+                fn()
+            except Exception:
+                pass
 
-        for policy_off in [
+        for fn in [
             lambda: self.view.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff),
             lambda: self.view.setHorizontalScrollBarPolicy(
                 QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
             ),
         ]:
             try:
-                policy_off()
-                break
+                fn(); break
             except Exception:
                 pass
 
-        for policy_off in [
+        for fn in [
             lambda: self.view.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff),
             lambda: self.view.setVerticalScrollBarPolicy(
                 QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
             ),
         ]:
             try:
-                policy_off()
-                break
+                fn(); break
             except Exception:
                 pass
 
@@ -157,12 +233,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         split.addWidget(self.view, stretch=3)
 
-        def _qt(attr, *fallbacks):
-            for name in (attr, *fallbacks):
-                v = getattr(QtCore.Qt, name, None)
+        def _qt(*names):
+            for n in names:
+                v = getattr(QtCore.Qt, n, None)
                 if v is not None:
                     return v
-            return None
 
         ign = _qt("IgnoreAspectRatio", "AspectRatioMode.IgnoreAspectRatio")
         keep = _qt("KeepAspectRatio", "AspectRatioMode.KeepAspectRatio")
@@ -188,11 +263,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bird_x = 80
         self.bird_item.setPos(self.bird_x, self.bird.y)
 
-        self.label = QtWidgets.QLabel("Calibrating...")
+        self.label = QtWidgets.QLabel("")
+        self.label.setStyleSheet("font-size: 14px; padding: 4px;")
         main_layout.addWidget(self.label)
 
     # ------------------------------------------------------------------
-    # EEG update loop
+    # Calibration label helpers
+    # ------------------------------------------------------------------
+
+    def _tick_dots(self):
+        """Called every 500 ms to animate the '...' in the calibration label."""
+        if self.calibrating:
+            self.calib_dot_count = (self.calib_dot_count + 1) % 4
+            self._update_calib_label()
+
+    def _update_calib_label(self):
+        dots = "." * self.calib_dot_count
+        pad = " " * (3 - self.calib_dot_count)  # keep label width stable
+        if self.mode == 1:
+            self.label.setText(
+                f"Calibrating blinks{dots}{pad}  — blinks detected: {self.calib_detected}"
+            )
+        else:
+            self.label.setText(
+                f"Calibrating jaw clenches{dots}{pad}  — clenches detected: {self.calib_detected}"
+            )
+
+    # ------------------------------------------------------------------
+    # EEG loop
     # ------------------------------------------------------------------
 
     def update_loop(self):
@@ -216,92 +314,94 @@ class MainWindow(QtWidgets.QMainWindow):
         times = np.array(self.time_buffer)[-window_samples:]
 
         signal = preprocess(data, self.stream.fs)
-        rel_time = times - times[-1]
-        self.curve.setData(rel_time, signal)
+        self.curve.setData(times - times[-1], signal)
 
         if self.calibrating:
             self._run_calibration(signal, times)
             return
 
+        # Post-calibration detection — only one motor drives the jump
         if self.mode == 1:
-            self._handle_blink_mode(signal, times)
+            self._handle_blink(signal, times)
         else:
-            self._handle_jaw_mode(signal, times)
+            self._handle_jaw(signal, times)
 
     # ------------------------------------------------------------------
-    # Shared calibration logic
+    # Shared calibration
     # ------------------------------------------------------------------
 
     def _run_calibration(self, signal, times):
         if self.calibration_start_time is None:
             self.calibration_start_time = times[-1]
 
+        # Count events live during calibration so user gets feedback
+        if self.mode == 1:
+            _, events = self.detector.detect(signal, times, self.thresh_min)
+        else:
+            _, events, _ = self.detector.detect(signal, times, self.thresh_min)
+
+        if events:
+            self.calib_detected += len(events)
+            self._update_calib_label()
+
         elapsed = times[-1] - self.calibration_start_time
-
-        # Update countdown in label
-        remaining = max(0, int(self.calibration_duration - elapsed))
-        mode_hint = {
-            1: f"Calibrating: blink naturally... ({remaining}s)",
-            2: f"Calibrating: clench jaw 3–5 times... ({remaining}s)",
-        }
-        self.label.setText(mode_hint.get(self.mode, f"Calibrating... ({remaining}s)"))
-
         if elapsed < self.calibration_duration:
             return
 
-        # Time's up — run calibration
+        # Time's up — run the appropriate calibration
         calib_signal = preprocess(np.array(self.calibration_data), self.stream.fs)
 
         success = False
         if hasattr(self.detector, "calibrate"):
             success = self.detector.calibrate(calib_signal)
         else:
-            # Detector has no calibrate() — skip gracefully
-            success = True
+            success = True  # detector has no calibrate(); skip gracefully
 
         if success:
             self.calibrating = False
-            ready_msg = {
-                1: "Calibration complete! Blink to flap.",
-                2: "Calibration complete! Clench to flap.",
-            }
-            self.label.setText(ready_msg.get(self.mode, "Calibration complete!"))
+            self.dot_timer.stop()
+            self.calib_detected = 0
+            if self.mode == 1:
+                self.label.setText("Calibration complete! Blink to flap.")
+            else:
+                self.label.setText("Calibration complete! Clench to flap.")
         else:
             # Reset and retry
             self.calibration_data = []
             self.calibration_start_time = times[-1]
-            retry_msg = {
-                1: "Calibration failed — blink more clearly and try again.",
-                2: "Calibration failed — clench more firmly and try again.",
-            }
-            self.label.setText(retry_msg.get(self.mode, "Calibration failed, retrying..."))
+            self.calib_detected = 0
+            self.calib_dot_count = 0
+            if self.mode == 1:
+                self.label.setText("Calibration failed — blink more clearly, retrying...")
+            else:
+                self.label.setText("Calibration failed — clench more firmly, retrying...")
 
     # ------------------------------------------------------------------
-    # Detection handlers
+    # Detection handlers (post-calibration)
     # ------------------------------------------------------------------
 
-    def _handle_blink_mode(self, signal, times):
-        peaks, blinks = self.detector.detect(signal, times, self.thresh_min)
+    def _handle_blink(self, signal, times):
+        _, blinks = self.detector.detect(signal, times, self.thresh_min)
         if blinks:
-            self.blink_count += len(blinks)
-            self.label.setText(f"Blinks: {self.blink_count}")
+            self.event_count += len(blinks)
+            self.label.setText(f"Blinks: {self.event_count}")
             self.bird.jump()
 
-    def _handle_jaw_mode(self, signal, times):
-        peaks, clenches, info = self.detector.detect(signal, times, self.thresh_min)
+    def _handle_jaw(self, signal, times):
+        _, clenches, _ = self.detector.detect(signal, times, self.thresh_min)
         if clenches:
-            self.jaw_count += len(clenches)
-            self.label.setText(f"Jaw clenches: {self.jaw_count}")
+            self.event_count += len(clenches)
+            self.label.setText(f"Jaw clenches: {self.event_count}")
             self.clench_hold_until = time.monotonic() + self.hold_seconds
 
     # ------------------------------------------------------------------
-    # Game update loop
+    # Game loop
     # ------------------------------------------------------------------
 
     def update_game(self):
         now = time.monotonic()
 
-        if self.mode == 2:
+        if self.mode == 2 and not self.calibrating:
             if now < self.clench_hold_until and (now - self.last_jump_time) >= self.jump_interval:
                 self.bird.jump()
                 self.last_jump_time = now
@@ -317,18 +417,7 @@ class MainWindow(QtWidgets.QMainWindow):
 if __name__ == "__main__":
     import sys
 
-    print("Choose control mode:")
-    print("1 = Eye Blink")
-    print("2 = Jaw Clench")
-
-    try:
-        mode = int(input("Enter 1 or 2: ").strip())
-        if mode not in (1, 2):
-            mode = 1
-    except Exception:
-        mode = 1
-
     app = QtWidgets.QApplication(sys.argv)
-    window = MainWindow(mode=mode)
+    window = MainWindow()
     window.show()
     sys.exit(app.exec())
