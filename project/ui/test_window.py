@@ -87,13 +87,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calib_dot_count = 0
         self.calib_detected = 0
 
-        # Jaw hold-to-jump state
+        # Jaw timing state
         self.clench_hold_until = 0.0
         self.last_jump_time = 0.0
         self.jump_interval = 0.18
         self.hold_seconds = 0.35
 
-        # Short cooldown after a blink event in jaw mode
+        # Brief block after a blink-like event in jaw mode
         self.jaw_block_until = 0.0
         self.jaw_block_seconds = 0.25
 
@@ -255,7 +255,6 @@ class MainWindow(QtWidgets.QMainWindow):
         return "Clench steadily when prompted; try not to blink during calibration."
 
     def _tick_dots(self):
-        """Called every 500 ms to animate the '...' in the calibration label."""
         if self.calibrating:
             self.calib_dot_count = (self.calib_dot_count + 1) % 4
             self._update_calib_label()
@@ -316,7 +315,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._handle_jaw(signal, times, blink_events)
 
     # ------------------------------------------------------------------
-    # Shared calibration
+    # Calibration
     # ------------------------------------------------------------------
 
     def _run_calibration(self, signal, times, blink_events=None):
@@ -340,7 +339,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if elapsed < self.calibration_duration:
             return
 
-        # Always finish calibration; do not block on failure.
         calib_signal = preprocess(np.array(self.calibration_data), self.stream.fs)
 
         if hasattr(self.detector, "calibrate"):
@@ -376,7 +374,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _handle_jaw(self, signal, times, blink_events=None):
         now = time.monotonic()
 
-        # If a blink event is present, briefly ignore jaw detections.
         if blink_events:
             self.jaw_block_until = now + self.jaw_block_seconds
             return
