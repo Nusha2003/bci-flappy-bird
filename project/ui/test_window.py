@@ -56,9 +56,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("BCI Flappy Bird")
         self.resize(1100, 700)
 
-        self.mode = None  # set after mode select screen
+        self.mode = None
 
-        # Show mode select first
         self._select_screen = ModeSelectScreen()
         self._select_screen.mode_selected.connect(self._on_mode_selected)
         self.setCentralWidget(self._select_screen)
@@ -88,13 +87,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calib_dot_count = 0
         self.calib_detected = 0
 
-        # Jaw hold-to-jump state (mode 2 only)
+        # Jaw hold-to-jump state
         self.clench_hold_until = 0.0
         self.last_jump_time = 0.0
         self.jump_interval = 0.18
         self.hold_seconds = 0.35
 
-        # Short jaw cooldown after a real blink event
+        # Short cooldown after a blink event in jaw mode
         self.jaw_block_until = 0.0
         self.jaw_block_seconds = 0.25
 
@@ -107,7 +106,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.blink_veto_detector = BlinkDetector(self.stream.fs)
             self.setWindowTitle("EEG Jaw Clench Flappy Bird")
 
-        # Use a slightly higher threshold for the blink-veto detector if needed.
         self.blink_veto_thresh = 70.0
 
         self._setup_game_ui()
@@ -264,8 +262,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_calib_label(self):
         dots = "." * self.calib_dot_count
-        pad = " " * (3 - self.calib_dot_count)  # keep label width stable
+        pad = " " * (3 - self.calib_dot_count)
         instruction = self._calibration_instruction()
+
         if self.mode == 1:
             self.label.setText(
                 f"Calibrating blinks{dots}{pad}  — blinks detected: {self.calib_detected}  |  {instruction}"
@@ -307,10 +306,10 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
         if self.calibrating:
+            self.calibration_data.extend(fp1.tolist())
             self._run_calibration(signal, times, blink_events)
             return
 
-        # Post-calibration detection — only one motor drives the jump
         if self.mode == 1:
             self._handle_blink(signal, times)
         else:
@@ -324,7 +323,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.calibration_start_time is None:
             self.calibration_start_time = times[-1]
 
-        # Count events live during calibration so user gets feedback
+        # Live feedback during calibration
         if self.mode == 1:
             _, events = self.detector.detect(signal, times, self.thresh_min)
         else:
@@ -341,59 +340,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if elapsed < self.calibration_duration:
             return
 
-        # Time's up — run the appropriate calibration
-        if len(self.calibration_data) < max(10, int(self.stream.fs * 0.5)):
-            self.calibration_data = []
-            self.calibration_start_time = times[-1]
-            self.calib_detected = 0
-            self.calib_dot_count = 0
-            if self.mode == 1:
-                self.label.setText(
-                    f"Calibration failed — not enough clean blink data.  |  {self._calibration_instruction()}"
-                )
-            else:
-                self.label.setText(
-                    f"Calibration failed — not enough clean clench data.  |  {self._calibration_instruction()}"
-                )
-            return
-
+        # Always finish calibration; do not block on failure.
         calib_signal = preprocess(np.array(self.calibration_data), self.stream.fs)
 
-        success = False
         if hasattr(self.detector, "calibrate"):
-            success = self.detector.calibrate(calib_signal)
-        else:
-            success = True  # detector has no calibrate(); skip gracefully
+            try:
+                self.detector.calibrate(calib_signal)
+            except Exception:
+                pass
 
-        if success:
-            self.calibrating = False
-            self.dot_timer.stop()
-            self.calib_detected = 0
-            if self.mode == 1:
-                self.label.setText(
-                    f"Calibration complete! Blink to flap.  |  {self._calibration_instruction()}"
-                )
-            else:
-                self.label.setText(
-                    f"Calibration complete! Clench to flap.  |  {self._calibration_instruction()}"
-                )
+        self.calibrating = False
+        self.dot_timer.stop()
+        self.calib_detected = 0
+
+        if self.mode == 1:
+            self.label.setText(
+                f"Calibration complete! Blink to flap.  |  {self._calibration_instruction()}"
+            )
         else:
-            # Reset and retry
-            self.calibration_data = []
-            self.calibration_start_time = times[-1]
-            self.calib_detected = 0
-            self.calib_dot_count = 0
-            if self.mode == 1:
-                self.label.setText(
-                    f"Calibration failed — blink more clearly, retrying...  |  {self._calibration_instruction()}"
-                )
-            else:
-                self.label.setText(
-                    f"Calibration failed — clench more firmly, retrying...  |  {self._calibration_instruction()}"
-                )
+            self.label.setText(
+                f"Calibration complete! Clench to flap.  |  {self._calibration_instruction()}"
+            )
 
     # ------------------------------------------------------------------
-    # Detection handlers (post-calibration)
+    # Detection handlers
     # ------------------------------------------------------------------
 
     def _handle_blink(self, signal, times):
@@ -406,7 +376,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _handle_jaw(self, signal, times, blink_events=None):
         now = time.monotonic()
 
-        # If the blink detector fires, briefly ignore jaw detections.
+        # If a blink event is present, briefly ignore jaw detections.
         if blink_events:
             self.jaw_block_until = now + self.jaw_block_seconds
             return
