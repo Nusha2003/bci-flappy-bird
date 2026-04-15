@@ -78,7 +78,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Jaw mode should be higher so blinks do not trigger clenches.
         # If this is still too sensitive, raise it to 50-60.
-        self.jaw_thresh_min = 45.0
+        self.jaw_thresh_min = 0.2
 
         self.buffer = deque(maxlen=int(self.stream.fs * 5))
         self.time_buffer = deque(maxlen=int(self.stream.fs * 5))
