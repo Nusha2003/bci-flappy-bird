@@ -30,53 +30,28 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
         title = QtWidgets.QLabel("BCI Flappy Bird")
         title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setStyleSheet("color: #e0e0ff; font-size: 32px; font-weight: bold;")
         layout.addWidget(title)
 
         subtitle = QtWidgets.QLabel("Choose your control method")
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #8888aa; font-size: 16px;")
         layout.addWidget(subtitle)
 
         layout.addSpacing(16)
 
         btn_blink = QtWidgets.QPushButton("Eye Blink")
         btn_blink.setFixedSize(220, 64)
-        btn_blink.setStyleSheet("""
-            QPushButton {
-                background-color: #3a3aff;
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-                border-radius: 12px;
-                border: none;
-            }
-            QPushButton:hover { background-color: #5555ff; }
-            QPushButton:pressed { background-color: #2222cc; }
-        """)
+        
         btn_blink.clicked.connect(lambda: self.mode_selected.emit(1))
         layout.addWidget(btn_blink, alignment=QtCore.Qt.AlignCenter)
 
         btn_jaw = QtWidgets.QPushButton("Jaw Clench")
         btn_jaw.setFixedSize(220, 64)
-        btn_jaw.setStyleSheet("""
-            QPushButton {
-                background-color: #ff5533;
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-                border-radius: 12px;
-                border: none;
-            }
-            QPushButton:hover { background-color: #ff7755; }
-            QPushButton:pressed { background-color: #cc3311; }
-        """)
+        
         btn_jaw.clicked.connect(lambda: self.mode_selected.emit(2))
         layout.addWidget(btn_jaw, alignment=QtCore.Qt.AlignCenter)
 
         hint = QtWidgets.QLabel("Blink to flap  ·  Clench to flap")
         hint.setAlignment(QtCore.Qt.AlignCenter)
-        hint.setStyleSheet("color: #555577; font-size: 13px;")
         layout.addWidget(hint)
 
 
