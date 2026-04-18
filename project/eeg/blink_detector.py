@@ -9,7 +9,7 @@ class BlinkDetector:
     def __init__(self, fs):
         self.fs = fs
         self.recent_blinks = []
-        self.refractory = 0.5
+        self.refractory = 0.2
         self.last_blink_time = 0
         self.merge_tol = 0.04
 
