@@ -31,7 +31,7 @@ class BlinkDetector:
 
         peaks, props = find_peaks(
             signal,
-            height=signal_range * 0.15,   # low threshold to catch soft blinks
+            height=signal_range * 0.15,
             width=(int(0.04*self.fs), int(0.4*self.fs)),
             distance=int(0.2*self.fs)
         )
@@ -42,16 +42,15 @@ class BlinkDetector:
 
         peak_heights = props["peak_heights"]
 
-        cutoff = np.percentile(peak_heights, 20)
-        peak_heights = peak_heights[peak_heights > cutoff]
+        low  = np.percentile(peak_heights, 5)
+        high = np.percentile(peak_heights, 95)
+        trimmed = peak_heights[(peak_heights >= low) & (peak_heights <= high)]
 
-        if len(peak_heights) == 0:
+        if len(trimmed) == 0:
             print("Calibration failed: peaks too weak")
             return False
-        self.calibrated_thresh = np.percentile(peak_heights, 35)
 
-        self.calibrated_thresh *= 0.9
-
+        self.calibrated_thresh = float(np.mean(trimmed))
         self.calibrated = True
 
         print(f"Calibration complete. Threshold = {self.calibrated_thresh:.2f}")
