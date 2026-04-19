@@ -9,7 +9,7 @@ class JawClenchDetector:
     def __init__(self, fs):
         self.fs = fs
         self.recent_clenches = []
-        self.refractory = 0.35
+        self.refractory = 0.2
         self.last_clench_time = 0
         self.merge_tol = 0.06
 

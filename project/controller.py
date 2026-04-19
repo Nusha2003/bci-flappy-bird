@@ -25,9 +25,13 @@ class EEGController:
     def __init__(self, mode: int):
         self.mode = mode
         self.stream = EEGStream()
+        ch_list = ['Pz', 'F4', 'C4', 'P4', 'P3', 'C3', 'F3', 'TRG']
+        self.pick_channels = ['F4']
+        self.indices = [self.stream.ch_names.index(ch) for ch in self.pick_channels]
+
 
         #need to change this - just looking athe channel we are interested in
-        self.fp1_index = 1
+
 
         #the length in time that the plot displays
         self.plot_duration = 2
@@ -56,6 +60,7 @@ class EEGController:
 
         self.jaw_block_until = 0.0
         self.jaw_block_seconds = 0.25
+
 
         if self.mode == 1:
             self.detector = BlinkDetector(self.stream.fs)
@@ -86,9 +91,9 @@ class EEGController:
         if len(ts) == 0:
             return None
 
-        fp1 = chunk[:, self.fp1_index]
+        channel_stream = chunk[:, self.indices[0]]
 
-        for value, timestamp in zip(fp1, ts):
+        for value, timestamp in zip(channel_stream, ts):
             self.buffer.append(value)
             self.time_buffer.append(timestamp)
 
@@ -107,7 +112,7 @@ class EEGController:
             )
 
         if self.calibrating:
-            self.calibration_data.extend(fp1.tolist())
+            self.calibration_data.extend(channel_stream.tolist())
             self._run_calibration(signal, times, blink_events)
             return ControllerUpdate(
                 rel_times=times - times[-1],
