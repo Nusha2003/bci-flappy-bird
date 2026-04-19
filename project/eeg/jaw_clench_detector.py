@@ -16,6 +16,9 @@ class JawClenchDetector:
         self.baseline_window = []
         self.baseline_size = int(5 * fs)
 
+        self.calibrated_thresh = None
+        self.calibrated = False
+
     def _bandpass(self, signal, lowcut, highcut):
         x = np.asarray(signal, dtype=float)
         if x.size < 20:
@@ -61,6 +64,52 @@ class JawClenchDetector:
 
         return med, scale
 
+    def _jaw_envelope(self, signal):
+        jaw_band = self._bandpass(signal, 20.0, 45.0)
+        return self._envelope(jaw_band)
+
+    def calibrate(self, signal):
+        signal = np.asarray(signal, dtype=float)
+        if signal.size == 0:
+            print("Calibration failed: empty jaw signal")
+            return False
+
+        jaw_env = self._jaw_envelope(signal)
+        base_med, base_scale = self._robust_stats(jaw_env)
+
+        seed_thresh = max(
+            base_med + 1.2 * base_scale,
+            float(np.percentile(jaw_env, 75)),
+        )
+
+        peaks, props = find_peaks(
+            jaw_env,
+            height=seed_thresh,
+            width=(int(0.02 * self.fs), int(0.30 * self.fs)),
+            distance=int(0.15 * self.fs),
+            prominence=max(seed_thresh * 0.04, 1e-6),
+        )
+
+        if len(peaks) < 3:
+            print("Calibration failed: not enough jaw clench candidates")
+            return False
+
+        peak_heights = props["peak_heights"]
+        cutoff = np.percentile(peak_heights, 20)
+        peak_heights = peak_heights[peak_heights > cutoff]
+
+        if len(peak_heights) == 0:
+            print("Calibration failed: jaw clenches too weak")
+            return False
+
+        self.calibrated_thresh = float(np.percentile(peak_heights, 35)) * 0.9
+        self.calibrated = True
+
+        self.baseline_window = jaw_env[-self.baseline_size :].tolist()
+
+        print(f"Calibration complete. Threshold = {self.calibrated_thresh:.3f}")
+        return True
+
     def detect(self, signal, timestamps, thresh_min):
         signal = np.asarray(signal, dtype=float)
         timestamps = np.asarray(timestamps, dtype=float)
@@ -72,25 +121,27 @@ class JawClenchDetector:
                 "peak_heights": [],
             }
 
-        # Jaw band
-        jaw_band = self._bandpass(signal, 20.0, 45.0)
+        jaw_env = self._jaw_envelope(signal)
 
-        # Rectify and smooth into an energy envelope
-        jaw_env = self._envelope(jaw_band)
-
-        # Keep a running baseline so idle noise does not trigger constantly
         self.baseline_window.extend(jaw_env.tolist())
         if len(self.baseline_window) > self.baseline_size:
             self.baseline_window = self.baseline_window[-self.baseline_size:]
 
         base_med, base_scale = self._robust_stats(self.baseline_window)
 
-        # Easier than the previous version, but still needs a real burst
-        thresh = max(
+        adaptive_thresh = max(
             base_med + 1.8 * base_scale,
             float(np.percentile(jaw_env, 88)),
-            float(thresh_min),
         )
+
+        if self.calibrated:
+            thresh = max(
+                float(self.calibrated_thresh),
+                adaptive_thresh * 0.85,
+                float(thresh_min),
+            )
+        else:
+            thresh = max(adaptive_thresh, float(thresh_min))
 
         peaks, props = find_peaks(
             jaw_env,
