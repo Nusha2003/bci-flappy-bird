@@ -1,127 +1,129 @@
-# eeg/hand_clench_detector.py
 import time
+from pathlib import Path
+
+import joblib
 import numpy as np
-from scipy.signal import butter, filtfilt, find_peaks
 import pylsl
+
+from model.decode import DEFAULT_DATA_DIR, DEFAULT_MODEL_PATH, train_model
 
 
 class HandClenchDetector:
-    def __init__(self, fs):
+    def __init__(self, fs, model_path: str | Path | None = None):
         self.fs = fs
+        self.model_path = Path(model_path) if model_path is not None else DEFAULT_MODEL_PATH
+
         self.recent_clenches = []
         self.refractory = 0.35
         self.last_clench_time = 0
         self.merge_tol = 0.06
 
-        self.baseline_window = []
-        self.baseline_size = int(5 * fs)
+        self.threshold = 0.5
+        self.calibrated = False
 
-    def _bandpass(self, signal, lowcut, highcut):
+        artifact = self._load_or_train_model()
+        self.pipeline = artifact["pipeline"]
+        self.window_samples = int(artifact["window_samples"])
+
+    def _load_or_train_model(self):
+        if self.model_path.exists():
+            return joblib.load(self.model_path)
+
+        artifact, _, _, _, _ = train_model(
+            data_path=DEFAULT_DATA_DIR,
+            output_model_path=self.model_path,
+        )
+        return artifact
+
+    def _prepare_epoch(self, signal):
         x = np.asarray(signal, dtype=float)
-        if x.size < 20:
-            return x
+        if x.ndim == 1:
+            x = x[:, np.newaxis]
 
-        nyq = 0.5 * self.fs
-        low = max(lowcut / nyq, 1e-4)
-        high = min(highcut / nyq, 0.9999)
-        if low >= high:
-            return x
+        if x.ndim != 2:
+            raise ValueError(f"Expected 2D signal, got shape {x.shape}")
 
-        b, a = butter(4, [low, high], btype="band")
-        padlen = 3 * max(len(a), len(b))
-        if x.size <= padlen:
-            return x
+        if x.shape[0] < x.shape[1]:
+            samples_first = x.T
+        else:
+            samples_first = x
 
-        return filtfilt(b, a, x)
+        if samples_first.shape[0] < self.window_samples:
+            return None
 
-    def _envelope(self, signal, window_s=0.05):
+        window = samples_first[-self.window_samples :, :]
+        return window.T[np.newaxis, :, :]
+
+    def _predict_probability(self, signal):
+        epoch = self._prepare_epoch(signal)
+        if epoch is None:
+            return None
+
+        return float(self.pipeline.predict_proba(epoch)[0, 1])
+
+    def calibrate(self, clench_signal, rest_signal):
+        clench_probs = self._score_calibration_signal(clench_signal)
+        rest_probs = self._score_calibration_signal(rest_signal)
+
+        if len(clench_probs) == 0 or len(rest_probs) == 0:
+            print("Calibration failed: not enough hand clench calibration windows")
+            return False
+
+        clench_floor = float(np.percentile(clench_probs, 25))
+        rest_ceiling = float(np.percentile(rest_probs, 90))
+        self.threshold = max(0.5, (clench_floor + rest_ceiling) / 2.0)
+        self.calibrated = True
+
+        print(f"Calibration complete. Probability threshold = {self.threshold:.3f}")
+        return True
+
+    def _score_calibration_signal(self, signal):
         x = np.asarray(signal, dtype=float)
-        n = max(int(window_s * self.fs), 1)
+        if x.ndim == 1:
+            x = x[:, np.newaxis]
+        if x.shape[0] < x.shape[1]:
+            x = x.T
 
-        if x.size < n:
-            return np.sqrt(np.mean(x ** 2)) * np.ones_like(x)
+        if x.shape[0] < self.window_samples:
+            return []
 
-        kernel = np.ones(n, dtype=float) / n
-        power = np.convolve(x ** 2, kernel, mode="same")
-        return np.sqrt(np.maximum(power, 0.0))
-
-    def _robust_stats(self, x):
-        x = np.asarray(x, dtype=float)
-        if x.size == 0:
-            return 0.0, 1.0
-
-        med = float(np.median(x))
-        mad = float(np.median(np.abs(x - med)))
-        scale = 1.4826 * mad
-
-        if not np.isfinite(scale) or scale <= 1e-12:
-            scale = float(np.std(x))
-        if not np.isfinite(scale) or scale <= 1e-12:
-            scale = 1.0
-
-        return med, scale
+        step = max(self.window_samples // 2, 1)
+        probs = []
+        for end in range(self.window_samples, x.shape[0] + 1, step):
+            window = x[end - self.window_samples : end, :]
+            epoch = window.T[np.newaxis, :, :]
+            probs.append(float(self.pipeline.predict_proba(epoch)[0, 1]))
+        return probs
 
     def detect(self, signal, timestamps, thresh_min):
-        signal = np.asarray(signal, dtype=float)
         timestamps = np.asarray(timestamps, dtype=float)
 
-        if signal.size == 0:
+        prob = self._predict_probability(signal)
+        if prob is None:
             return np.array([], dtype=int), [], {
-                "threshold": 0.0,
-                "n_peaks": 0,
-                "peak_heights": [],
+                "threshold": float(self.threshold),
+                "probability": 0.0,
             }
 
-        # Jaw band
-        jaw_band = self._bandpass(signal, 20.0, 45.0)
-
-        # Rectify and smooth into an energy envelope
-        jaw_env = self._envelope(jaw_band)
-
-        # Keep a running baseline so idle noise does not trigger constantly
-        self.baseline_window.extend(jaw_env.tolist())
-        if len(self.baseline_window) > self.baseline_size:
-            self.baseline_window = self.baseline_window[-self.baseline_size:]
-
-        base_med, base_scale = self._robust_stats(self.baseline_window)
-
-        # Easier than the previous version, but still needs a real burst
-        thresh = max(
-            base_med + 1.8 * base_scale,
-            float(np.percentile(jaw_env, 88)),
-            float(thresh_min),
-        )
-
-        peaks, props = find_peaks(
-            jaw_env,
-            height=thresh,
-            width=(int(0.02 * self.fs), int(0.30 * self.fs)),
-            distance=int(0.15 * self.fs),
-            prominence=max(thresh * 0.06, 1e-6),
-        )
-
+        threshold = max(float(self.threshold), float(thresh_min))
+        peaks = np.array([], dtype=int)
         new_clenches = []
         now = time.time()
 
-        for p in peaks:
-            t = float(timestamps[p])
+        if prob >= threshold and len(timestamps) > 0:
+            event_time = float(timestamps[-1])
 
-            if any(abs(t - prev) < self.merge_tol for prev in self.recent_clenches):
-                continue
-
-            if now - self.last_clench_time < self.refractory:
-                continue
-
-            self.last_clench_time = now
-            self.recent_clenches.append(t)
-            new_clenches.append(t)
+            if not any(abs(event_time - prev) < self.merge_tol for prev in self.recent_clenches):
+                if now - self.last_clench_time >= self.refractory:
+                    self.last_clench_time = now
+                    self.recent_clenches.append(event_time)
+                    new_clenches.append(event_time)
 
         now_lsl = pylsl.local_clock()
         self.recent_clenches = [t for t in self.recent_clenches if now_lsl - t < 2]
 
         info = {
-            "threshold": float(thresh),
-            "n_peaks": int(len(peaks)),
-            "peak_heights": props.get("peak_heights", np.array([])).tolist() if len(peaks) else [],
+            "threshold": float(threshold),
+            "probability": float(prob),
         }
         return peaks, new_clenches, info

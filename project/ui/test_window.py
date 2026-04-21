@@ -39,7 +39,14 @@ class ModeSelectScreen(QtWidgets.QWidget):
         btn_jaw.clicked.connect(lambda: self.mode_selected.emit(2))
         layout.addWidget(btn_jaw, alignment=QtCore.Qt.AlignCenter)
 
-        hint = QtWidgets.QLabel("Blink to flap  ·  Clench to flap")
+        btn_hand = QtWidgets.QPushButton("Hand Clench")
+        btn_hand.setFixedSize(220, 64)
+        btn_hand.clicked.connect(lambda: self.mode_selected.emit(3))
+        layout.addWidget(btn_hand, alignment=QtCore.Qt.AlignCenter)
+
+        hint = QtWidgets.QLabel(
+            "Blink to flap  ·  Jaw clench to flap  ·  Hand clench to flap"
+        )
         hint.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(hint)
 
@@ -109,7 +116,7 @@ class MainWindow(QtWidgets.QMainWindow):
         split = QtWidgets.QHBoxLayout()
         main_layout.addLayout(split)
 
-        self.plot = pg.PlotWidget(title="EEG (Fp1)")
+        self.plot = pg.PlotWidget(title=f"EEG ({self.controller.plot_channel_name})")
         self.plot.setYRange(-150, 150)
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.curve = self.plot.plot(pen="y")
