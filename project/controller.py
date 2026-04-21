@@ -38,13 +38,13 @@ class EEGController:
 
         self.calibrating = True
         self.calibration_data = []
-        self.calibration_duration = 5
+        self.calibration_duration = 10
         self.calibration_start_time = None
         self.calib_dot_count = 0
         self.calib_detected = 0
 
         self.hand_calibration_target = 20
-        self.hand_calibration_samples_per_phase = int(self.stream.fs * 1.0)
+        self.hand_calibration_samples_per_phase = int(self.stream.fs * 3.0)
         self.hand_calibration_phase = "rest"
         self.hand_phase_buffer = []
         self.hand_rest_segments = []
@@ -147,7 +147,7 @@ class EEGController:
                 self.calibration_data.extend(blink_signal.tolist())
                 self._run_single_channel_calibration(blink_signal, times)
             elif self.mode == 2:
-                jaw_signal = self._combine_channels(control_signal)
+                jaw_signal = np.max(np.abs(control_signal), axis=1)
                 self.calibration_data.extend(jaw_signal.tolist())
                 self._run_jaw_calibration(jaw_signal, times, blink_events)
 

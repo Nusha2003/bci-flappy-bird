@@ -9,7 +9,7 @@ class JawClenchDetector:
         self.fs = fs
 
         self.recent_clenches = []
-        self.refractory = 1.0  
+        self.refractory =0.5  
         self.last_clench_time = 0
         self.merge_tol = 0.5
 
@@ -75,8 +75,8 @@ class JawClenchDetector:
         signal_range = np.percentile(signal, 95) - np.percentile(signal, 5)
 
         adaptive_thresh = max(
-            signal_range * 0.6,
-            float(np.percentile(signal, 85)),
+            signal_range * 0.3,
+            float(np.percentile(signal, 70)),
             float(thresh_min),
         )
 
