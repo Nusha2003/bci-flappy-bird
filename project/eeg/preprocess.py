@@ -19,3 +19,17 @@ def preprocess(signal, fs):
         signal = -signal
 
     return signal
+
+
+def smooth_signal(signal, fs, window_ms=80):
+    """Light display-only smoothing to make the live trace less jittery."""
+    x = np.asarray(signal, dtype=float)
+    if x.size < 3:
+        return x
+
+    window_n = max(3, int(round((window_ms / 1000.0) * fs)))
+    if window_n % 2 == 0:
+        window_n += 1
+
+    kernel = np.ones(window_n, dtype=float) / window_n
+    return np.convolve(x, kernel, mode="same")

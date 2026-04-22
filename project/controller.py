@@ -7,7 +7,7 @@ import numpy as np
 from eeg.blink_detector import BlinkDetector
 from eeg.hand_clench_detector import HandClenchDetector
 from eeg.ml_jaw_clench_detector import MLJawClenchDetector
-from eeg.preprocess import preprocess
+from eeg.preprocess import preprocess, smooth_signal
 from eeg.stream import EEGStream
 
 
@@ -150,6 +150,7 @@ class EEGController:
         times = np.array(self.time_buffer)[-window_samples:]
 
         plot_signal = preprocess(data[:, self.plot_channel_index], self.stream.fs)
+        plot_signal = smooth_signal(plot_signal, self.stream.fs, window_ms=90)
         blink_signal = self._preprocess_mean(data[:, self.blink_channel_indices])
         control_signal = data[:, self.control_channel_indices]
 
