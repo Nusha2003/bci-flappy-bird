@@ -150,7 +150,7 @@ class EEGController:
         times = np.array(self.time_buffer)[-window_samples:]
 
         plot_signal = preprocess(data[:, self.plot_channel_index], self.stream.fs)
-        plot_signal = smooth_signal(plot_signal, self.stream.fs, window_ms=90)
+        plot_signal = smooth_signal(plot_signal, self.stream.fs, window_ms=180)
         blink_signal = self._preprocess_mean(data[:, self.blink_channel_indices])
         control_signal = data[:, self.control_channel_indices]
 
