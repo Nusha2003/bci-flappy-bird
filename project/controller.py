@@ -82,7 +82,7 @@ class EEGController:
         self.plot_channel_name = self.stream.ch_names[self.plot_channel_index]
 
         self.blink_channel_indices = self._resolve_channel_indices(
-            ["F4", "F3", "FP1", "FP2", "FPZ"]
+            ["F4"]
         )
         if not self.blink_channel_indices:
             self.blink_channel_indices = [self.plot_channel_index]
