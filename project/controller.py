@@ -245,15 +245,22 @@ class EEGController:
             return
 
         calib_signal = preprocess(np.array(self.calibration_data), self.stream.fs)
+        success = True
         if hasattr(self.detector, "calibrate"):
             try:
-                self.detector.calibrate(calib_signal)
+                success = bool(self.detector.calibrate(calib_signal))
             except Exception:
-                pass
+                success = False
 
-        self.calibrating = False
-        self.calib_detected = 0
-        self.status_text = self._build_ready_status()
+        if success:
+            self.calibrating = False
+            self.calib_detected = 0
+            self.status_text = self._build_ready_status()
+        else:
+            self.calibration_data = []
+            self.calibration_start_time = times[-1]
+            self.calib_detected = 0
+            self.status_text = "Blink calibration failed. Try again with clearer blinks."
 
     def _run_jaw_calibration(
         self,
@@ -276,16 +283,25 @@ class EEGController:
         if (times[-1] - self.calibration_start_time) < self.calibration_duration:
             return
 
-        calib_signal = preprocess(np.array(self.calibration_data), self.stream.fs)
+        calib_signal = np.array(self.calibration_data, dtype=float)
+        success = True
         if hasattr(self.detector, "calibrate"):
             try:
-                self.detector.calibrate(calib_signal)
+                success = bool(self.detector.calibrate(calib_signal))
             except Exception:
-                pass
+                success = False
 
-        self.calibrating = False
-        self.calib_detected = 0
-        self.status_text = self._build_ready_status()
+        if success:
+            self.calibrating = False
+            self.calib_detected = 0
+            self.status_text = self._build_ready_status()
+        else:
+            self.calibration_data = []
+            self.calibration_start_time = times[-1]
+            self.calib_detected = 0
+            self.status_text = (
+                "Jaw calibration failed. Try firmer clenches and avoid blinking."
+            )
 
     def _run_hand_calibration(self, chunk: np.ndarray) -> None:
         for sample in chunk:
