@@ -670,6 +670,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._eeg_timer.start(20)
         self._dot_timer.start(500)
 
+        if self.controller.mode == 1:
+            self._game_timer = QtCore.QTimer(self)
+            self._game_timer.timeout.connect(self._calibration_game_tick)
+            self._game_timer.start(16)
+
     def _show_play(self):
         self._stop_timers()
         self._calib_screen = None
@@ -758,19 +763,24 @@ class MainWindow(QtWidgets.QMainWindow):
             if detected > getattr(self, "_last_calib_detected", 0) and self._calib_bird is not None:
                 self._calib_bird.jump()
             self._last_calib_detected = detected
-
-            if self._calib_bird is not None and self._calib_practice_screen is not None:
-                self._calib_bird.update()
-                self._calib_bird.y = max(0, min(_GAME_H, self._calib_bird.y))
-                self._calib_practice_screen.update_bird(
-                    self._calib_bird.y,
-                    self._calib_bird.vel,
-                )
         else:
             self._calib_screen.set_remaining(None)
 
         if not self.controller.calibrating:
             self._show_play()
+
+    def _calibration_game_tick(self):
+        if self.controller.mode != 1 or self._calib_bird is None:
+            return
+
+        self._calib_bird.update()
+        self._calib_bird.y = max(0, min(_GAME_H, self._calib_bird.y))
+
+        if self._calib_practice_screen is not None:
+            self._calib_practice_screen.update_bird(
+                self._calib_bird.y,
+                self._calib_bird.vel,
+            )
 
     def _eeg_tick(self):
         update = self.controller.process_eeg()
