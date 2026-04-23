@@ -292,20 +292,28 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
 class CalibrationScreen(_BgWidget):
     def __init__(self, controller: EEGController, parent=None):
-        super().__init__(parent)
+        QtWidgets.QWidget.__init__(self, parent)
         self._ctrl = controller
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QtGui.QColor("#10161f"))
+        self.setPalette(palette)
         self._build_ui()
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setAlignment(QtCore.Qt.AlignCenter)
-        layout.setSpacing(16)
+        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setSpacing(18)
 
-        title = QtWidgets.QLabel("Calibrating now.")
-        title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setFont(_font_title(44))
-        title.setStyleSheet(f"color: {ORANGE}; background: transparent;")
-        layout.addWidget(title)
+        badge = QtWidgets.QLabel("Calibration")
+        badge.setAlignment(QtCore.Qt.AlignCenter)
+        badge.setFont(_font_body(12, bold=True))
+        badge.setStyleSheet(
+            f"color: {ORANGE}; background: rgba(242, 160, 7, 28);"
+            "padding: 6px 12px; border-radius: 12px;"
+        )
+        badge.setMaximumWidth(140)
+        layout.addWidget(badge, alignment=QtCore.Qt.AlignCenter)
 
         if self._ctrl.mode == 1:
             headline = "Eye Blink Calibration"
@@ -322,37 +330,46 @@ class CalibrationScreen(_BgWidget):
 
         headline_label = QtWidgets.QLabel(headline)
         headline_label.setAlignment(QtCore.Qt.AlignCenter)
-        headline_label.setFont(_font_body(18, bold=True))
+        headline_label.setWordWrap(True)
+        headline_label.setFont(_font_body(19, bold=True))
         headline_label.setStyleSheet("color: white; background: transparent;")
         layout.addWidget(headline_label)
 
         instr = QtWidgets.QLabel(detail)
         instr.setAlignment(QtCore.Qt.AlignCenter)
         instr.setWordWrap(True)
-        instr.setFont(_font_body(14))
-        instr.setMaximumWidth(300)
+        instr.setFont(_font_body(13))
         instr.setStyleSheet(
-            "color: white; background: rgba(0, 0, 0, 90); padding: 10px; border-radius: 8px;"
+            "color: #d5dde8; background: rgba(255, 255, 255, 18); "
+            "padding: 14px; border-radius: 14px;"
         )
-        layout.addWidget(instr, alignment=QtCore.Qt.AlignCenter)
+        layout.addWidget(instr)
 
         self._status = QtWidgets.QLabel(self._ctrl.status_text)
         self._status.setAlignment(QtCore.Qt.AlignCenter)
         self._status.setWordWrap(True)
         self._status.setFont(_font_body(14, bold=True))
-        self._status.setMaximumWidth(300)
         self._status.setStyleSheet(
-            "color: white; background: rgba(0, 0, 0, 120); padding: 10px; border-radius: 8px;"
+            "color: white; background: rgba(255, 255, 255, 24); "
+            "padding: 16px; border-radius: 16px;"
         )
-        layout.addWidget(self._status, alignment=QtCore.Qt.AlignCenter)
+        layout.addWidget(self._status)
 
         self._countdown = QtWidgets.QLabel("")
         self._countdown.setAlignment(QtCore.Qt.AlignCenter)
-        self._countdown.setFont(_font_body(18, bold=True))
+        self._countdown.setFont(_font_body(16, bold=True))
         self._countdown.setStyleSheet(
-            "color: white; background: rgba(0, 0, 0, 90); padding: 8px; border-radius: 8px;"
+            f"color: {ORANGE}; background: rgba(242, 160, 7, 22); "
+            "padding: 10px 14px; border-radius: 12px;"
         )
-        layout.addWidget(self._countdown)
+        layout.addWidget(self._countdown, alignment=QtCore.Qt.AlignCenter)
+        layout.addStretch(1)
+
+    def paintEvent(self, event):
+        del event
+        painter = QtGui.QPainter(self)
+        painter.fillRect(self.rect(), QtGui.QColor("#10161f"))
+        painter.end()
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
@@ -632,7 +649,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         container = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(18)
 
         self._eeg_plot = pg.PlotWidget(
             title=f"EEG ({self.controller.plot_channel_name})"
@@ -640,6 +658,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._eeg_plot.setYRange(-150, 150)
         self._eeg_plot.showGrid(x=True, y=True, alpha=0.3)
         self._eeg_curve = self._eeg_plot.plot(pen="y")
+        self._eeg_plot.setMinimumWidth(420)
         layout.addWidget(self._eeg_plot)
 
         self._calib_status_label = None
@@ -651,34 +670,57 @@ class MainWindow(QtWidgets.QMainWindow):
             self._last_calib_detected = int(getattr(self.controller, "calib_detected", 0))
             self._calib_bird = Bird(y=_GAME_H // 2)
             self._calib_practice_screen = PlayScreen(self.controller)
+            self._calib_practice_screen.setMinimumWidth(420)
+            self._calib_practice_screen.setMaximumWidth(520)
 
             right_panel = QtWidgets.QWidget()
             right_layout = QtWidgets.QVBoxLayout(right_panel)
             right_layout.setContentsMargins(0, 0, 0, 0)
-            right_layout.setSpacing(10)
+            right_layout.setSpacing(14)
             right_layout.addWidget(self._calib_practice_screen)
 
-            hint = QtWidgets.QLabel("Practice blinking to flap while calibration runs")
+            hint = QtWidgets.QLabel("Eye Blink Calibration")
             hint.setAlignment(QtCore.Qt.AlignCenter)
-            hint.setStyleSheet("font-size: 16px; font-weight: bold; padding: 4px;")
-            right_layout.addWidget(hint)
+            hint.setStyleSheet("font-size: 18px; font-weight: bold; padding: 2px; color: white;")
+            right_layout.addWidget(hint, alignment=QtCore.Qt.AlignCenter)
+
+            detail = QtWidgets.QLabel(
+                "Practice blinking to flap while calibration runs. "
+                "Keep your jaw relaxed between blinks."
+            )
+            detail.setAlignment(QtCore.Qt.AlignCenter)
+            detail.setWordWrap(True)
+            detail.setStyleSheet(
+                "font-size: 13px; color: #d5dde8; background: rgba(16, 22, 31, 235); "
+                "padding: 14px; border-radius: 14px;"
+            )
+            right_layout.addWidget(detail)
 
             self._calib_status_label = QtWidgets.QLabel(self.controller.status_text)
             self._calib_status_label.setAlignment(QtCore.Qt.AlignCenter)
             self._calib_status_label.setWordWrap(True)
-            self._calib_status_label.setStyleSheet("font-size: 14px; padding: 4px;")
+            self._calib_status_label.setStyleSheet(
+                "font-size: 14px; font-weight: bold; color: white; "
+                "background: rgba(16, 22, 31, 245); padding: 16px; border-radius: 16px;"
+            )
             right_layout.addWidget(self._calib_status_label)
 
             self._calib_countdown_label = QtWidgets.QLabel("")
             self._calib_countdown_label.setAlignment(QtCore.Qt.AlignCenter)
-            self._calib_countdown_label.setStyleSheet("font-size: 16px; padding: 4px;")
-            right_layout.addWidget(self._calib_countdown_label)
+            self._calib_countdown_label.setStyleSheet(
+                f"font-size: 16px; font-weight: bold; color: {ORANGE}; "
+                "background: rgba(242, 160, 7, 22); padding: 10px 14px; border-radius: 12px;"
+            )
+            right_layout.addWidget(self._calib_countdown_label, alignment=QtCore.Qt.AlignCenter)
 
             layout.addWidget(right_panel)
         else:
             self._calib_screen = CalibrationScreen(self.controller)
-            self._calib_screen.setFixedSize(_GAME_W, _GAME_H)
+            self._calib_screen.setMinimumWidth(420)
             layout.addWidget(self._calib_screen)
+
+        layout.setStretch(0, 1)
+        layout.setStretch(1, 1)
 
         self.setCentralWidget(container)
         self.setFocus()
@@ -706,6 +748,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._play_screen = PlayScreen(self.controller)
         self._pipes: list[dict] = []
         self._pipe_timer = 0
+        self._first_pipe_spawn_interval = 18
         self._pipe_spawn_interval = 90
         self._pipe_speed = 3.0
         self._pipe_gap = 200
@@ -821,7 +864,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._play_screen.update_bird(self._bird.y, self._bird.vel)
 
         self._pipe_timer += 1
-        if self._pipe_timer >= self._pipe_spawn_interval:
+        spawn_interval = (
+            self._first_pipe_spawn_interval if not self._pipes else self._pipe_spawn_interval
+        )
+        if self._pipe_timer >= spawn_interval:
             self._pipe_timer = 0
             gap_top = random.randint(80, _GAME_H - 80 - self._pipe_gap)
             self._pipes.append({
