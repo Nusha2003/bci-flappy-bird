@@ -308,31 +308,50 @@ class CalibrationScreen(_BgWidget):
         layout.addWidget(title)
 
         if self._ctrl.mode == 1:
-            mode_word = "blink"
+            headline = "Eye Blink Calibration"
+            detail = "Blink naturally when prompted and keep your face relaxed."
         elif self._ctrl.mode == 2:
-            mode_word = "jaw clench"
+            headline = "Jaw Clench Calibration"
+            detail = (
+                "Clench only when prompted. Relax your jaw and avoid blinking "
+                "or extra facial movement between trials."
+            )
         else:
-            mode_word = "hand clench"
+            headline = "Hand Clench Calibration"
+            detail = "Follow the REST and CLENCH prompts and stay still otherwise."
 
-        instr = QtWidgets.QLabel(
-            f"Follow the prompt for {mode_word} calibration."
-        )
+        headline_label = QtWidgets.QLabel(headline)
+        headline_label.setAlignment(QtCore.Qt.AlignCenter)
+        headline_label.setFont(_font_body(18, bold=True))
+        headline_label.setStyleSheet("color: white; background: transparent;")
+        layout.addWidget(headline_label)
+
+        instr = QtWidgets.QLabel(detail)
         instr.setAlignment(QtCore.Qt.AlignCenter)
-        instr.setFont(_font_body(20))
-        instr.setStyleSheet("color: white; background: transparent;")
-        layout.addWidget(instr)
+        instr.setWordWrap(True)
+        instr.setFont(_font_body(14))
+        instr.setMaximumWidth(300)
+        instr.setStyleSheet(
+            "color: white; background: rgba(0, 0, 0, 90); padding: 10px; border-radius: 8px;"
+        )
+        layout.addWidget(instr, alignment=QtCore.Qt.AlignCenter)
 
         self._status = QtWidgets.QLabel(self._ctrl.status_text)
         self._status.setAlignment(QtCore.Qt.AlignCenter)
         self._status.setWordWrap(True)
-        self._status.setFont(_font_body(18, bold=True))
-        self._status.setStyleSheet("color: white; background: transparent;")
-        layout.addWidget(self._status)
+        self._status.setFont(_font_body(14, bold=True))
+        self._status.setMaximumWidth(300)
+        self._status.setStyleSheet(
+            "color: white; background: rgba(0, 0, 0, 120); padding: 10px; border-radius: 8px;"
+        )
+        layout.addWidget(self._status, alignment=QtCore.Qt.AlignCenter)
 
         self._countdown = QtWidgets.QLabel("")
         self._countdown.setAlignment(QtCore.Qt.AlignCenter)
-        self._countdown.setFont(_font_body(24, bold=True))
-        self._countdown.setStyleSheet("color: white; background: transparent;")
+        self._countdown.setFont(_font_body(18, bold=True))
+        self._countdown.setStyleSheet(
+            "color: white; background: rgba(0, 0, 0, 90); padding: 8px; border-radius: 8px;"
+        )
         layout.addWidget(self._countdown)
 
     def set_status(self, text: str) -> None:
