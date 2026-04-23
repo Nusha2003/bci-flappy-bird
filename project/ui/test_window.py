@@ -616,6 +616,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._high_score = _load_high_score()
 
         self._mode = None
+        self._bird_tuning: dict[int, dict[str, float]] = {}
         self._eeg_timer = QtCore.QTimer(self)
         self._game_timer = QtCore.QTimer(self)
         self._dot_timer = QtCore.QTimer(self)
@@ -638,7 +639,87 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_mode_selected(self, mode: int):
         self._mode = mode
+        if mode not in self._bird_tuning:
+            self._bird_tuning[mode] = self._default_bird_physics(mode)
         self._show_calibration()
+
+    def _default_bird_physics(self, mode: int) -> dict[str, float]:
+        if mode == 1:
+            return {"gravity": 0.46, "jump": 9.5}
+        if mode == 2:
+            return {"gravity": 0.52, "jump": 12.0}
+        return {"gravity": 0.5, "jump": 11.0}
+
+    def _bird_physics(self) -> dict[str, float]:
+        if self._mode not in self._bird_tuning:
+            self._bird_tuning[self._mode] = self._default_bird_physics(self._mode)
+        return dict(self._bird_tuning[self._mode])
+
+    def _build_physics_controls(self) -> QtWidgets.QWidget:
+        physics = self._bird_physics()
+
+        panel = QtWidgets.QFrame()
+        panel.setStyleSheet(
+            "QFrame { background: rgba(16, 22, 31, 235); border-radius: 14px; }"
+            "QLabel { color: white; }"
+        )
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+
+        title = QtWidgets.QLabel("Bird Tuning")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-size: 15px; font-weight: bold;")
+        layout.addWidget(title)
+
+        self._gravity_value_label = QtWidgets.QLabel("")
+        self._jump_value_label = QtWidgets.QLabel("")
+
+        gravity_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        gravity_slider.setRange(20, 100)
+        gravity_slider.setValue(int(round(physics["gravity"] * 100)))
+        gravity_slider.valueChanged.connect(self._on_gravity_changed)
+
+        jump_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        jump_slider.setRange(50, 180)
+        jump_slider.setValue(int(round(physics["jump"] * 10)))
+        jump_slider.valueChanged.connect(self._on_jump_changed)
+
+        layout.addWidget(self._gravity_value_label)
+        layout.addWidget(gravity_slider)
+        layout.addWidget(self._jump_value_label)
+        layout.addWidget(jump_slider)
+
+        self._gravity_slider = gravity_slider
+        self._jump_slider = jump_slider
+        self._refresh_physics_labels()
+        return panel
+
+    def _refresh_physics_labels(self):
+        if not hasattr(self, "_gravity_value_label") or self._gravity_value_label is None:
+            return
+        physics = self._bird_physics()
+        self._gravity_value_label.setText(f"Gravity: {physics['gravity']:.2f}")
+        self._jump_value_label.setText(f"Jump: {physics['jump']:.1f}")
+
+    def _apply_bird_physics_to_live_birds(self):
+        physics = self._bird_physics()
+        if hasattr(self, "_bird") and self._bird is not None:
+            self._bird.gravity = physics["gravity"]
+            self._bird.jump_strength = physics["jump"]
+        if hasattr(self, "_calib_bird") and self._calib_bird is not None:
+            self._calib_bird.gravity = physics["gravity"]
+            self._calib_bird.jump_strength = physics["jump"]
+
+    def _on_gravity_changed(self, value: int):
+        self._bird_tuning[self._mode]["gravity"] = value / 100.0
+        self._refresh_physics_labels()
+        self._apply_bird_physics_to_live_birds()
+
+    def _on_jump_changed(self, value: int):
+        self._bird_tuning[self._mode]["jump"] = value / 10.0
+        self._refresh_physics_labels()
+        self._apply_bird_physics_to_live_birds()
 
     def _show_calibration(self):
         self._stop_timers()
@@ -665,10 +746,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._calib_countdown_label = None
         self._calib_bird = None
         self._calib_practice_screen = None
+        self._gravity_slider = None
+        self._jump_slider = None
+        self._gravity_value_label = None
+        self._jump_value_label = None
 
         if self.controller.mode == 1:
             self._last_calib_detected = int(getattr(self.controller, "calib_detected", 0))
-            self._calib_bird = Bird(y=_GAME_H // 2)
+            self._calib_bird = Bird(y=_GAME_H // 2, **self._bird_physics())
             self._calib_practice_screen = PlayScreen(self.controller)
             self._calib_practice_screen.setMinimumWidth(420)
             self._calib_practice_screen.setMaximumWidth(520)
@@ -712,12 +797,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 "background: rgba(242, 160, 7, 22); padding: 10px 14px; border-radius: 12px;"
             )
             right_layout.addWidget(self._calib_countdown_label, alignment=QtCore.Qt.AlignCenter)
+            right_layout.addWidget(self._build_physics_controls())
 
             layout.addWidget(right_panel)
         else:
             self._calib_screen = CalibrationScreen(self.controller)
             self._calib_screen.setMinimumWidth(420)
             layout.addWidget(self._calib_screen)
+            layout.itemAt(1).widget().layout().addWidget(self._build_physics_controls())
 
         layout.setStretch(0, 1)
         layout.setStretch(1, 1)
@@ -742,7 +829,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._calib_status_label = None
         self._calib_countdown_label = None
         self.resize(_GAME_W * 2 + 20, _GAME_H + 40)
-        self._bird = Bird(y=_GAME_H // 2)
+        self._bird = Bird(y=_GAME_H // 2, **self._bird_physics())
         self._score = 0
 
         self._play_screen = PlayScreen(self.controller)
@@ -771,6 +858,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_label.setStyleSheet("font-size: 14px; padding: 4px;")
         layout.addWidget(self._status_label)
         self._refresh_status_label()
+        layout.addWidget(self._build_physics_controls())
 
         self.setCentralWidget(container)
         self.setFocus()
