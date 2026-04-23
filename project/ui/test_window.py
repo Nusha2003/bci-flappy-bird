@@ -727,10 +727,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self._high_score = score
             _save_high_score(score)
         screen = GameOverScreen(score, self._high_score)
-        screen.restart.connect(self._show_calibration)
+        screen.restart.connect(self._play_again_same_player)
         screen.go_home.connect(self._show_home)
         self.setCentralWidget(screen)
         self.setFocus()
+
+    def _play_again_same_player(self):
+        if hasattr(self, "controller") and self.controller is not None:
+            self._show_play()
+            return
+        self._show_calibration()
 
     def _calibration_tick(self):
         update = self.controller.process_eeg()
