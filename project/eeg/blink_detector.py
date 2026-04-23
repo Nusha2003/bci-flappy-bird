@@ -48,7 +48,7 @@ class BlinkDetector:
         if len(peak_heights) == 0:
             print("Calibration failed: peaks too weak")
             return False
-        self.calibrated_thresh = np.percentile(peak_heights, 35)
+        self.calibrated_thresh = np.percentile(peak_heights, 80)
 
         self.calibrated_thresh *= 0.9
 

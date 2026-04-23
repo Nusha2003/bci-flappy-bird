@@ -3,7 +3,7 @@ import random
 import serial
 
 
-PORT = 'COM3'
+PORT = 'COM4'
 
 REST_TRIGGER = 1
 READY_TRIGGER = 2

@@ -6,10 +6,15 @@ from pathlib import Path
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 
+# PySide2/PySide6 use Signal; PyQt5/PyQt6 use pyqtSignal
+try:
+    _Signal = QtCore.pyqtSignal
+except AttributeError:
+    _Signal = QtCore.Signal
+
 from controller import EEGController
 from game.flappy import Bird
 
-# ── constants ─────────────────────────────────────────────────────────────────
 
 ORANGE = "#F2A007"
 PIPE_WIDTH = 60
@@ -17,7 +22,8 @@ _BG_CACHE: QtGui.QPixmap | None = None
 
 _SCORE_FILE = Path(__file__).resolve().parents[1] / "high_score.json"
 
-_GAME_W, _GAME_H = 360, 640   # canonical game canvas dimensions
+_GAME_W, _GAME_H = 420, 640
+_EEG_W = _GAME_W      # EEG plot matches game canvas width (1:1)
 
 
 def _load_high_score() -> int:
@@ -34,8 +40,6 @@ def _save_high_score(score: int) -> None:
         pass
 
 
-# ── asset helpers ─────────────────────────────────────────────────────────────
-
 def _asset_path(filename: str) -> Path:
     root = Path(__file__).resolve().parents[2]
     for candidate in [
@@ -47,7 +51,11 @@ def _asset_path(filename: str) -> Path:
     return root / "mvp" / "src" / "game" / filename
 
 
-def _load_pixmap(filename: str, fallback_size=(360, 640), fallback_color=None) -> QtGui.QPixmap:
+def _load_pixmap(
+    filename: str,
+    fallback_size=(360, 640),
+    fallback_color=None,
+) -> QtGui.QPixmap:
     pix = QtGui.QPixmap(str(_asset_path(filename)))
     if not pix.isNull():
         return pix
@@ -63,25 +71,27 @@ def _bg_pixmap() -> QtGui.QPixmap:
     return _BG_CACHE
 
 
-# ── fonts ─────────────────────────────────────────────────────────────────────
-
 def _font_title(size: int = 52) -> QtGui.QFont:
     return QtGui.QFont("Comic Sans MS", size, QtGui.QFont.Bold)
 
 
 def _font_body(size: int = 18, bold: bool = True) -> QtGui.QFont:
-    f = QtGui.QFont("Comic Sans MS", size)
-    f.setBold(bold)
-    return f
+    font = QtGui.QFont("Comic Sans MS", size)
+    font.setBold(bold)
+    return font
 
-
-# ── stroked label (fill color + white outline) ────────────────────────────────
 
 class _StrokedLabel(QtWidgets.QWidget):
-    """Draws multi-line text with a white stroke using QPainterPath."""
+    """Draw multi-line text with a white outline for the retro screens."""
 
-    def __init__(self, text: str, font: QtGui.QFont, fill_color: str,
-                 stroke_width: int = 3, parent=None):
+    def __init__(
+        self,
+        text: str,
+        font: QtGui.QFont,
+        fill_color: str,
+        stroke_width: int = 3,
+        parent=None,
+    ):
         super().__init__(parent)
         self._text = text
         self._font = font
@@ -89,23 +99,26 @@ class _StrokedLabel(QtWidgets.QWidget):
         self._stroke_width = stroke_width
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred
+            QtWidgets.QSizePolicy.Preferred,
+            QtWidgets.QSizePolicy.Preferred,
         )
 
     def sizeHint(self):
         fm = QtGui.QFontMetrics(self._font)
         lines = self._text.split("\n")
-        w = max(fm.horizontalAdvance(l) for l in lines) + self._stroke_width * 2 + 4
-        h = fm.height() * len(lines) + fm.leading() * (len(lines) - 1) + self._stroke_width * 2 + 4
-        return QtCore.QSize(w, h)
+        width = max(fm.horizontalAdvance(line) for line in lines)
+        width += self._stroke_width * 2 + 4
+        height = fm.height() * len(lines)
+        height += fm.leading() * (len(lines) - 1) + self._stroke_width * 2 + 4
+        return QtCore.QSize(width, height)
 
     def minimumSizeHint(self):
         return self.sizeHint()
 
     def paintEvent(self, _event):
-        p = QtGui.QPainter(self)
-        p.setRenderHint(QtGui.QPainter.Antialiasing)
-        p.setRenderHint(QtGui.QPainter.TextAntialiasing)
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
 
         fm = QtGui.QFontMetrics(self._font)
         lines = self._text.split("\n")
@@ -121,42 +134,47 @@ class _StrokedLabel(QtWidgets.QWidget):
             path = QtGui.QPainterPath()
             path.addText(x, y, self._font, line)
 
-            pen = QtGui.QPen(QtGui.QColor("white"), self._stroke_width * 2,
-                             QtCore.Qt.SolidLine, QtCore.Qt.RoundCap, QtCore.Qt.RoundJoin)
-            p.setPen(pen)
-            p.setBrush(QtCore.Qt.NoBrush)
-            p.drawPath(path)
+            pen = QtGui.QPen(
+                QtGui.QColor("white"),
+                self._stroke_width * 2,
+                QtCore.Qt.SolidLine,
+                QtCore.Qt.RoundCap,
+                QtCore.Qt.RoundJoin,
+            )
+            painter.setPen(pen)
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawPath(path)
 
-            p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(self._fill)
-            p.drawPath(path)
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(self._fill)
+            painter.drawPath(path)
 
-        p.end()
+        painter.end()
 
-
-# ── shared background base ────────────────────────────────────────────────────
 
 class _BgWidget(QtWidgets.QWidget):
-    """Fills itself with flappybirdbg.png, cropping to preserve aspect ratio."""
+    """Fill the widget using the Flappy background cropped to preserve aspect."""
 
     def paintEvent(self, _event):
-        p = QtGui.QPainter(self)
+        painter = QtGui.QPainter(self)
         bg = _bg_pixmap()
         w, h = self.width(), self.height()
-        scaled = bg.scaled(w, h, QtCore.Qt.KeepAspectRatioByExpanding,
-                           QtCore.Qt.SmoothTransformation)
+        scaled = bg.scaled(
+            w,
+            h,
+            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.SmoothTransformation,
+        )
         x_off = (scaled.width() - w) // 2
         y_off = (scaled.height() - h) // 2
-        p.drawPixmap(-x_off, -y_off, scaled)
-        p.end()
+        painter.drawPixmap(-x_off, -y_off, scaled)
+        painter.end()
 
-
-# ── reusable menu item ────────────────────────────────────────────────────────
 
 class _MenuItem(QtWidgets.QWidget):
-    """Single menu row: a retro ▶ triangle (always occupying space) + label text."""
+    """Single retro menu row with a hover triangle."""
 
-    clicked = QtCore.Signal()
+    clicked = _Signal()
 
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
@@ -191,12 +209,10 @@ class _MenuItem(QtWidgets.QWidget):
         super().mousePressEvent(event)
 
 
-# ── screens ───────────────────────────────────────────────────────────────────
-
 class ModeSelectScreen(QtWidgets.QWidget):
     """Splash screen shown before the game. Emits mode_selected(int) on choice."""
 
-    mode_selected = QtCore.Signal(int)
+    mode_selected = _Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -218,8 +234,10 @@ class ModeSelectScreen(QtWidgets.QWidget):
         w, h = self.width(), self.height()
         if w > 0 and h > 0:
             self._cached_sw = _bg_pixmap().scaled(
-                w, h, QtCore.Qt.KeepAspectRatioByExpanding,
-                QtCore.Qt.SmoothTransformation
+                w,
+                h,
+                QtCore.Qt.KeepAspectRatioByExpanding,
+                QtCore.Qt.SmoothTransformation,
             ).width()
         super().resizeEvent(event)
 
@@ -229,18 +247,22 @@ class ModeSelectScreen(QtWidgets.QWidget):
             self.update()
 
     def paintEvent(self, _event):
-        p = QtGui.QPainter(self)
+        painter = QtGui.QPainter(self)
         bg = _bg_pixmap()
         w, h = self.width(), self.height()
         if w == 0 or h == 0:
             return
-        scaled = bg.scaled(w, h, QtCore.Qt.KeepAspectRatioByExpanding,
-                           QtCore.Qt.SmoothTransformation)
+        scaled = bg.scaled(
+            w,
+            h,
+            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.SmoothTransformation,
+        )
         sw = scaled.width()
         offset = int(self._scroll_x)
-        p.drawPixmap(-offset, 0, scaled)
-        p.drawPixmap(sw - offset, 0, scaled)
-        p.end()
+        painter.drawPixmap(-offset, 0, scaled)
+        painter.drawPixmap(sw - offset, 0, scaled)
+        painter.end()
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -248,7 +270,12 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
         layout.addStretch(2)
 
-        title = _StrokedLabel("BCI-Controlled\nFlappy Bird", _font_title(52), ORANGE, stroke_width=3)
+        title = _StrokedLabel(
+            "BCI-Controlled\nFlappy Bird",
+            _font_title(52),
+            ORANGE,
+            stroke_width=3,
+        )
         layout.addWidget(title, alignment=QtCore.Qt.AlignCenter)
 
         layout.addStretch(1)
@@ -263,7 +290,7 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
         for label, mode in [("Jaw Clench", 2), ("Fist Clench", 3), ("Eye Blink", 1)]:
             item = _MenuItem(label)
-            item.clicked.connect(lambda m=mode: self.mode_selected.emit(m))
+            item.clicked.connect(lambda _checked=False, m=mode: self.mode_selected.emit(m))
             layout.addWidget(item, alignment=QtCore.Qt.AlignCenter)
 
         layout.addStretch(2)
@@ -273,44 +300,52 @@ class CalibrationScreen(_BgWidget):
     def __init__(self, controller: EEGController, parent=None):
         super().__init__(parent)
         self._ctrl = controller
-        self._total = controller.calibration_duration
         self._build_ui()
-        try:
-            self._ctrl.calibration_progress.connect(self._on_progress)
-        except AttributeError:
-            pass
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setAlignment(QtCore.Qt.AlignCenter)
         layout.setSpacing(16)
 
-        title = QtWidgets.QLabel("Calibrating now.")
-        title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setFont(_font_title(44))
-        title.setStyleSheet(f"color: {ORANGE}; background: transparent;")
-        layout.addWidget(title)
+        title = _StrokedLabel("Calibrating now.", _font_title(44), ORANGE, stroke_width=3)
+        layout.addWidget(title, alignment=QtCore.Qt.AlignCenter)
 
-        mode_word = "blink" if self._ctrl.mode == 1 else "jaw clench"
+        if self._ctrl.mode == 1:
+            mode_word = "blink"
+        elif self._ctrl.mode == 2:
+            mode_word = "jaw clench"
+        else:
+            mode_word = "hand clench"
+
         instr = QtWidgets.QLabel(
-            f"{mode_word.capitalize()} for the next {int(self._total)} seconds."
+            f"Follow the prompt for {mode_word} calibration."
         )
         instr.setAlignment(QtCore.Qt.AlignCenter)
-        instr.setFont(_font_body(20))
+        instr.setFont(_font_body(17))
         instr.setStyleSheet("color: white; background: transparent;")
         layout.addWidget(instr)
 
-        self._countdown = QtWidgets.QLabel(f"{int(self._total)}s remaining")
+        self._status = QtWidgets.QLabel(self._ctrl.status_text)
+        self._status.setAlignment(QtCore.Qt.AlignCenter)
+        self._status.setWordWrap(True)
+        self._status.setFont(_font_body(18, bold=True))
+        self._status.setStyleSheet("color: white; background: transparent;")
+        layout.addWidget(self._status)
+
+        self._countdown = QtWidgets.QLabel("")
         self._countdown.setAlignment(QtCore.Qt.AlignCenter)
-        self._countdown.setFont(_font_body(28, bold=True))
+        self._countdown.setFont(_font_body(24, bold=True))
         self._countdown.setStyleSheet("color: white; background: transparent;")
         layout.addWidget(self._countdown)
 
-    def set_remaining(self, remaining: int) -> None:
-        self._countdown.setText(f"{remaining}s remaining")
+    def set_status(self, text: str) -> None:
+        self._status.setText(text)
 
-    def _on_progress(self, detected: int, elapsed: float, total: float):
-        self.set_remaining(max(0, int(total - elapsed) + 1))
+    def set_remaining(self, remaining: int | None) -> None:
+        if remaining is None:
+            self._countdown.setText("")
+        else:
+            self._countdown.setText(f"{remaining}s remaining")
 
 
 class PlayScreen(QtWidgets.QWidget):
@@ -343,10 +378,10 @@ class PlayScreen(QtWidgets.QWidget):
             (self._view.setHorizontalScrollBarPolicy, "ScrollBarAlwaysOff"),
             (self._view.setVerticalScrollBarPolicy, "ScrollBarAlwaysOff"),
         ]:
-            v = getattr(QtCore.Qt, attr, None)
-            if v is not None:
+            value = getattr(QtCore.Qt, attr, None)
+            if value is not None:
                 try:
-                    setter(v)
+                    setter(value)
                 except Exception:
                     pass
 
@@ -361,20 +396,24 @@ class PlayScreen(QtWidgets.QWidget):
         layout.addWidget(self._view)
 
         def _qt(*names):
-            for n in names:
-                v = getattr(QtCore.Qt, n, None)
-                if v is not None:
-                    return v
+            for name in names:
+                value = getattr(QtCore.Qt, name, None)
+                if value is not None:
+                    return value
 
         ign = _qt("IgnoreAspectRatio", "AspectRatioMode.IgnoreAspectRatio")
         keep = _qt("KeepAspectRatio", "AspectRatioMode.KeepAspectRatio")
         smooth = _qt("SmoothTransformation", "TransformationMode.SmoothTransformation")
 
         bg_pix = _load_pixmap(
-            "flappybirdbg.png", (_GAME_W, _GAME_H), QtGui.QColor(120, 200, 255)
+            "flappybirdbg.png",
+            (_GAME_W, _GAME_H),
+            QtGui.QColor(120, 200, 255),
         ).scaled(_GAME_W, _GAME_H, ign, smooth)
         bird_pix = _load_pixmap(
-            "flappybird.png", (34, 24), QtGui.QColor(255, 220, 0)
+            "flappybird.png",
+            (34, 24),
+            QtGui.QColor(255, 220, 0),
         ).scaled(34, 24, keep, smooth)
 
         bg_item = QtWidgets.QGraphicsPixmapItem(bg_pix)
@@ -388,25 +427,33 @@ class PlayScreen(QtWidgets.QWidget):
         self._bird_x = 80
         self._bird_item.setPos(self._bird_x, 300)
 
-        # Pipe image pool — 3 pairs covers max simultaneous pipes on screen
-        top_src = _load_pixmap("toppipe.png",    (PIPE_WIDTH, 400), QtGui.QColor(0, 150, 0))
-        bot_src = _load_pixmap("bottompipe.png", (PIPE_WIDTH, 400), QtGui.QColor(0, 150, 0))
+        top_src = _load_pixmap(
+            "toppipe.png",
+            (PIPE_WIDTH, 400),
+            QtGui.QColor(0, 150, 0),
+        )
+        bot_src = _load_pixmap(
+            "bottompipe.png",
+            (PIPE_WIDTH, 400),
+            QtGui.QColor(0, 150, 0),
+        )
         self._top_src = top_src
         self._bot_src = bot_src
         self._pipe_pool: list[tuple] = []
         for _ in range(3):
-            t = QtWidgets.QGraphicsPixmapItem(top_src)
-            t.setZValue(5)
-            t.setVisible(False)
-            self._scene.addItem(t)
-            b = QtWidgets.QGraphicsPixmapItem(bot_src)
-            b.setZValue(5)
-            b.setVisible(False)
-            self._scene.addItem(b)
-            self._pipe_pool.append((t, b))
+            top_item = QtWidgets.QGraphicsPixmapItem(top_src)
+            top_item.setZValue(5)
+            top_item.setVisible(False)
+            self._scene.addItem(top_item)
+
+            bot_item = QtWidgets.QGraphicsPixmapItem(bot_src)
+            bot_item.setZValue(5)
+            bot_item.setVisible(False)
+            self._scene.addItem(bot_item)
+
+            self._pipe_pool.append((top_item, bot_item))
 
     def _connect_signals(self):
-        # EEGController doesn't emit these signals yet — deferred
         try:
             self._ctrl.detection_event.connect(self._on_detection_event)
             self._ctrl.bird_updated.connect(self._on_bird_updated)
@@ -415,13 +462,11 @@ class PlayScreen(QtWidgets.QWidget):
             pass
 
     def update_bird(self, y: float, vel: float) -> None:
-        """Called by MainWindow each game tick until signal-based updates land."""
         angle = max(-30, min(60, vel * 3))
         self._bird_item.setRotation(angle)
         self._bird_item.setPos(self._bird_x, y)
 
     def update_pipes(self, pipes: list) -> None:
-        """Called by MainWindow each game tick with current pipe positions."""
         self._on_pipes_updated(pipes)
 
     def _on_detection_event(self, count: int):
@@ -439,18 +484,26 @@ class PlayScreen(QtWidgets.QWidget):
         for i, (top_item, bot_item) in enumerate(self._pipe_pool):
             if i < len(pipes):
                 x, top_h, bot_y, bot_h = pipes[i]
+
                 if top_h > 0 and src_h_top > 0:
-                    top_item.setTransform(QtGui.QTransform.fromScale(
-                        PIPE_WIDTH / src_w_top, top_h / src_h_top
-                    ))
+                    top_item.setTransform(
+                        QtGui.QTransform.fromScale(
+                            PIPE_WIDTH / src_w_top,
+                            top_h / src_h_top,
+                        )
+                    )
                     top_item.setPos(x, 0)
                     top_item.setVisible(True)
                 else:
                     top_item.setVisible(False)
+
                 if bot_h > 0 and src_h_bot > 0:
-                    bot_item.setTransform(QtGui.QTransform.fromScale(
-                        PIPE_WIDTH / src_w_bot, bot_h / src_h_bot
-                    ))
+                    bot_item.setTransform(
+                        QtGui.QTransform.fromScale(
+                            PIPE_WIDTH / src_w_bot,
+                            bot_h / src_h_bot,
+                        )
+                    )
                     bot_item.setPos(x, bot_y)
                     bot_item.setVisible(True)
                 else:
@@ -461,8 +514,8 @@ class PlayScreen(QtWidgets.QWidget):
 
 
 class GameOverScreen(_BgWidget):
-    restart = QtCore.Signal()
-    go_home = QtCore.Signal()
+    restart = _Signal()
+    go_home = _Signal()
 
     def __init__(self, score: int, high_score: int, parent=None):
         super().__init__(parent)
@@ -491,7 +544,12 @@ class GameOverScreen(_BgWidget):
 
         outer.addSpacing(12)
 
-        game_over_label = _StrokedLabel("GAME OVER", _font_title(56), ORANGE, stroke_width=3)
+        game_over_label = _StrokedLabel(
+            "GAME OVER",
+            _font_title(56),
+            ORANGE,
+            stroke_width=3,
+        )
         outer.addWidget(game_over_label, alignment=QtCore.Qt.AlignCenter)
 
         outer.addSpacing(24)
@@ -517,25 +575,53 @@ class GameOverScreen(_BgWidget):
         outer.addStretch(2)
 
 
-# ── main window ───────────────────────────────────────────────────────────────
-
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("BCI Flappy Bird")
         self._high_score = _load_high_score()
-        self._eeg_timer = QtCore.QTimer()
-        self._game_timer = QtCore.QTimer()
+        self._mode = None
+
+        self._eeg_timer = QtCore.QTimer(self)
+        self._game_timer = QtCore.QTimer(self)
+        self._dot_timer = QtCore.QTimer(self)
+        self._dot_timer.timeout.connect(self._dot_tick)
+
+        self.resize(_EEG_W + _GAME_W + 20, _GAME_H + 40)
+
+        root = QtWidgets.QWidget()
+        root_layout = QtWidgets.QHBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        self._eeg_plot = pg.PlotWidget(title="EEG")
+        self._eeg_plot.setFixedWidth(_EEG_W)
+        self._eeg_plot.setYRange(-150, 150)
+        self._eeg_plot.showGrid(x=True, y=True, alpha=0.3)
+        self._eeg_curve = self._eeg_plot.plot(pen="y")
+        root_layout.addWidget(self._eeg_plot)
+
+        self._right_stack = QtWidgets.QStackedWidget()
+        self._right_stack.setFixedWidth(_GAME_W)
+        root_layout.addWidget(self._right_stack)
+
+        self.setCentralWidget(root)
         self._show_home()
 
-    # ── screen transitions ────────────────────────────────────────────────────
+    def _set_right_widget(self, widget):
+        idx = self._right_stack.addWidget(widget)
+        self._right_stack.setCurrentIndex(idx)
+        while self._right_stack.count() > 1:
+            old = self._right_stack.widget(0)
+            self._right_stack.removeWidget(old)
+            old.setParent(None)
 
     def _show_home(self):
         self._stop_timers()
-        self.resize(_GAME_W, _GAME_H + 40)
+        self._eeg_plot.setTitle("EEG")
         screen = ModeSelectScreen()
         screen.mode_selected.connect(self._on_mode_selected)
-        self.setCentralWidget(screen)
+        self._set_right_widget(screen)
 
     def _on_mode_selected(self, mode: int):
         self._mode = mode
@@ -545,89 +631,77 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stop_timers()
         self.controller = EEGController(self._mode)
         self.setWindowTitle(self.controller.window_title)
-        self.resize(_GAME_W * 2 + 20, _GAME_H + 40)
+        self._eeg_plot.setTitle(f"EEG ({self.controller.plot_channel_name})")
 
         self._calib_screen = CalibrationScreen(self.controller)
-        self._calib_screen.setFixedSize(_GAME_W, _GAME_H)
-
-        container = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self._eeg_plot = pg.PlotWidget(title="EEG (F4)")
-        self._eeg_plot.setYRange(-150, 150)
-        self._eeg_plot.showGrid(x=True, y=True, alpha=0.3)
-        self._eeg_curve = self._eeg_plot.plot(pen="y")
-        layout.addWidget(self._eeg_plot)
-        layout.addWidget(self._calib_screen)
-
-        self.setCentralWidget(container)
+        self._set_right_widget(self._calib_screen)
 
         self._calib_start = time.monotonic()
-        self._eeg_timer = QtCore.QTimer()
+        self._eeg_timer = QtCore.QTimer(self)
         self._eeg_timer.timeout.connect(self._calibration_tick)
         self._eeg_timer.start(20)
+        self._dot_timer.start(500)
 
     def _show_play(self):
         self._stop_timers()
-        self.resize(_GAME_W * 2 + 20, _GAME_H + 40)
         self._bird = Bird(y=_GAME_H // 2)
         self._score = 0
 
         self._play_screen = PlayScreen(self.controller)
         self._pipes: list[dict] = []
         self._pipe_timer = 0
-        self._pipe_spawn_interval = 90  # frames (~1.5 s at 60 fps)
+        self._pipe_spawn_interval = 90
         self._pipe_speed = 3.0
         self._pipe_gap = 200
+        self._game_start = time.monotonic()
 
         container = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(container)
-        top_row = QtWidgets.QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._play_screen)
 
-        self._eeg_plot = pg.PlotWidget(title="EEG (F4)")
-        self._eeg_plot.setYRange(-150, 150)
-        self._eeg_plot.showGrid(x=True, y=True, alpha=0.3)
-        self._eeg_curve = self._eeg_plot.plot(pen="y")
-        top_row.addWidget(self._eeg_plot)
-        top_row.addWidget(self._play_screen)
-        layout.addLayout(top_row)
-
-        self._status_label = QtWidgets.QLabel(self.controller.status_text)
+        self._status_label = QtWidgets.QLabel("")
+        self._status_label.setWordWrap(True)
         self._status_label.setStyleSheet("font-size: 14px; padding: 4px;")
         layout.addWidget(self._status_label)
 
-        self.setCentralWidget(container)
+        self._set_right_widget(container)
+        self._refresh_status_label()
 
-        self._eeg_timer = QtCore.QTimer()
+        self._eeg_timer = QtCore.QTimer(self)
         self._eeg_timer.timeout.connect(self._eeg_tick)
         self._eeg_timer.start(20)
 
-        self._game_timer = QtCore.QTimer()
+        self._game_timer = QtCore.QTimer(self)
         self._game_timer.timeout.connect(self._game_tick)
         self._game_timer.start(16)
 
     def _show_game_over(self, score: int):
         self._stop_timers()
-        self.resize(_GAME_W, _GAME_H + 40)
         if score > self._high_score:
             self._high_score = score
             _save_high_score(score)
         screen = GameOverScreen(score, self._high_score)
-        screen.restart.connect(self._show_calibration)
+        screen.restart.connect(self._show_play)
         screen.go_home.connect(self._show_home)
-        self.setCentralWidget(screen)
-
-    # ── timer callbacks ───────────────────────────────────────────────────────
+        self._set_right_widget(screen)
 
     def _calibration_tick(self):
-        elapsed = time.monotonic() - self._calib_start
-        remaining = max(0, int(self.controller.calibration_duration - elapsed))
-        self._calib_screen.set_remaining(remaining)
-
         update = self.controller.process_eeg()
+
         if update is not None:
             self._eeg_curve.setData(update.rel_times, update.signal)
+            if update.status_text:
+                self._calib_screen.set_status(update.status_text)
+
+        if self.controller.mode == 1:
+            elapsed = time.monotonic() - self._calib_start
+            remaining = max(0, int(self.controller.calibration_duration - elapsed))
+            self._calib_screen.set_remaining(remaining)
+        else:
+            self._calib_screen.set_remaining(None)
+
         if not self.controller.calibrating:
             self._show_play()
 
@@ -635,9 +709,10 @@ class MainWindow(QtWidgets.QMainWindow):
         update = self.controller.process_eeg()
         if update is None:
             return
+
         self._eeg_curve.setData(update.rel_times, update.signal)
-        if update.status_text:
-            self._status_label.setText(update.status_text)
+        self._refresh_status_label(update.status_text)
+
         if update.jump_now:
             self._bird.jump()
 
@@ -649,52 +724,71 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bird.y = max(0, min(_GAME_H, self._bird.y))
         self._play_screen.update_bird(self._bird.y, self._bird.vel)
 
-        # ── spawn pipes ───────────────────────────────────────────────────────
-        self._pipe_timer += 1
+        if time.monotonic() - self._game_start >= 3.0:
+            self._pipe_timer += 1
         if self._pipe_timer >= self._pipe_spawn_interval:
             self._pipe_timer = 0
             gap_top = random.randint(80, _GAME_H - 80 - self._pipe_gap)
             self._pipes.append({
-                'x': float(_GAME_W),
-                'top_h': gap_top,
-                'bot_y': gap_top + self._pipe_gap,
-                'scored': False,
+                "x": float(_GAME_W),
+                "top_h": gap_top,
+                "bot_y": gap_top + self._pipe_gap,
+                "scored": False,
             })
 
-        # ── move pipes ────────────────────────────────────────────────────────
         for pipe in self._pipes:
-            pipe['x'] -= self._pipe_speed
+            pipe["x"] -= self._pipe_speed
 
-        # ── score: bird passed a pipe ─────────────────────────────────────────
         for pipe in self._pipes:
-            if not pipe['scored'] and pipe['x'] + PIPE_WIDTH < 80:
-                pipe['scored'] = True
+            if not pipe["scored"] and pipe["x"] + PIPE_WIDTH < 80:
+                pipe["scored"] = True
                 self._score += 1
-                self._status_label.setText(f"Score: {self._score}")
+                self._refresh_status_label()
 
-        # ── collision detection ───────────────────────────────────────────────
         bx, by = 80, self._bird.y
         for pipe in self._pipes:
-            if bx + 17 > pipe['x'] and bx - 17 < pipe['x'] + PIPE_WIDTH:
-                if by - 12 < pipe['top_h'] or by + 12 > pipe['bot_y']:
+            if bx + 17 > pipe["x"] and bx - 17 < pipe["x"] + PIPE_WIDTH:
+                if by - 12 < pipe["top_h"] or by + 12 > pipe["bot_y"]:
                     self._show_game_over(self._score)
                     return
 
-        # ── remove off-screen pipes ───────────────────────────────────────────
-        self._pipes = [p for p in self._pipes if p['x'] > -PIPE_WIDTH]
+        self._pipes = [pipe for pipe in self._pipes if pipe["x"] > -PIPE_WIDTH]
 
-        # ── push positions to PlayScreen ──────────────────────────────────────
-        pipe_data = [(p['x'], p['top_h'], p['bot_y'], _GAME_H - p['bot_y'])
-                     for p in self._pipes]
+        pipe_data = [
+            (pipe["x"], pipe["top_h"], pipe["bot_y"], _GAME_H - pipe["bot_y"])
+            for pipe in self._pipes
+        ]
         self._play_screen.update_pipes(pipe_data)
 
         if self._bird.y >= _GAME_H:
             self._show_game_over(self._score)
 
-    # ── helpers ───────────────────────────────────────────────────────────────
+    def _dot_tick(self):
+        if not hasattr(self, "controller") or not self.controller.calibrating:
+            return
+
+        status_text = self.controller.tick_calibration_indicator()
+        if not status_text:
+            return
+
+        if hasattr(self, "_calib_screen"):
+            self._calib_screen.set_status(status_text)
+        if hasattr(self, "_status_label"):
+            self._refresh_status_label(status_text)
+
+    def _refresh_status_label(self, controller_text: str | None = None):
+        if not hasattr(self, "_status_label"):
+            return
+
+        parts = [f"Score: {getattr(self, '_score', 0)}"]
+        if controller_text is None and hasattr(self, "controller"):
+            controller_text = self.controller.status_text
+        if controller_text:
+            parts.append(controller_text)
+        self._status_label.setText("  |  ".join(parts))
 
     def _stop_timers(self):
-        for timer in (self._eeg_timer, self._game_timer):
+        for timer in (self._eeg_timer, self._game_timer, self._dot_timer):
             if timer.isActive():
                 timer.stop()
 
@@ -705,4 +799,4 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

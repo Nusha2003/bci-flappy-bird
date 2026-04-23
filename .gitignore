@@ -12,3 +12,7 @@ __pycache__/
 # OS stuff
 .DS_Store
 Thumbs.db
+
+
+
+hand_clench_data/
