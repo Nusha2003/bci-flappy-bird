@@ -3,6 +3,7 @@ import random
 import time
 from pathlib import Path
 
+import sip
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 
@@ -575,6 +576,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("BCI Flappy Bird")
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self._high_score = _load_high_score()
 
         self._mode = None
@@ -587,10 +589,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_home(self):
         self._stop_timers()
+        self._status_label = None
+        self._calib_screen = None
+        self._calib_status_label = None
+        self._calib_countdown_label = None
         self.resize(_GAME_W, _GAME_H + 40)
         screen = ModeSelectScreen()
+        screen.setFocusPolicy(QtCore.Qt.NoFocus)
         screen.mode_selected.connect(self._on_mode_selected)
         self.setCentralWidget(screen)
+        self.setFocus()
 
     def _on_mode_selected(self, mode: int):
         self._mode = mode
@@ -598,12 +606,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_calibration(self):
         self._stop_timers()
+        self._status_label = None
         self.controller = EEGController(self._mode)
         self.setWindowTitle(self.controller.window_title)
         self.resize(_GAME_W * 2 + 20, _GAME_H + 40)
-
-        self._calib_screen = CalibrationScreen(self.controller)
-        self._calib_screen.setFixedSize(_GAME_W, _GAME_H)
 
         container = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(container)
@@ -616,9 +622,47 @@ class MainWindow(QtWidgets.QMainWindow):
         self._eeg_plot.showGrid(x=True, y=True, alpha=0.3)
         self._eeg_curve = self._eeg_plot.plot(pen="y")
         layout.addWidget(self._eeg_plot)
-        layout.addWidget(self._calib_screen)
+
+        self._calib_status_label = None
+        self._calib_countdown_label = None
+        self._calib_bird = None
+        self._calib_practice_screen = None
+
+        if self.controller.mode == 1:
+            self._last_calib_detected = int(getattr(self.controller, "calib_detected", 0))
+            self._calib_bird = Bird(y=_GAME_H // 2)
+            self._calib_practice_screen = PlayScreen(self.controller)
+
+            right_panel = QtWidgets.QWidget()
+            right_layout = QtWidgets.QVBoxLayout(right_panel)
+            right_layout.setContentsMargins(0, 0, 0, 0)
+            right_layout.setSpacing(10)
+            right_layout.addWidget(self._calib_practice_screen)
+
+            hint = QtWidgets.QLabel("Practice blinking to flap while calibration runs")
+            hint.setAlignment(QtCore.Qt.AlignCenter)
+            hint.setStyleSheet("font-size: 16px; font-weight: bold; padding: 4px;")
+            right_layout.addWidget(hint)
+
+            self._calib_status_label = QtWidgets.QLabel(self.controller.status_text)
+            self._calib_status_label.setAlignment(QtCore.Qt.AlignCenter)
+            self._calib_status_label.setWordWrap(True)
+            self._calib_status_label.setStyleSheet("font-size: 14px; padding: 4px;")
+            right_layout.addWidget(self._calib_status_label)
+
+            self._calib_countdown_label = QtWidgets.QLabel("")
+            self._calib_countdown_label.setAlignment(QtCore.Qt.AlignCenter)
+            self._calib_countdown_label.setStyleSheet("font-size: 16px; padding: 4px;")
+            right_layout.addWidget(self._calib_countdown_label)
+
+            layout.addWidget(right_panel)
+        else:
+            self._calib_screen = CalibrationScreen(self.controller)
+            self._calib_screen.setFixedSize(_GAME_W, _GAME_H)
+            layout.addWidget(self._calib_screen)
 
         self.setCentralWidget(container)
+        self.setFocus()
 
         self._calib_start = time.monotonic()
         self._eeg_timer = QtCore.QTimer(self)
@@ -628,6 +672,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_play(self):
         self._stop_timers()
+        self._calib_screen = None
+        self._calib_status_label = None
+        self._calib_countdown_label = None
         self.resize(_GAME_W * 2 + 20, _GAME_H + 40)
         self._bird = Bird(y=_GAME_H // 2)
         self._score = 0
@@ -659,6 +706,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_status_label()
 
         self.setCentralWidget(container)
+        self.setFocus()
 
         self._eeg_timer = QtCore.QTimer(self)
         self._eeg_timer.timeout.connect(self._eeg_tick)
@@ -670,6 +718,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_game_over(self, score: int):
         self._stop_timers()
+        self._status_label = None
+        self._calib_screen = None
+        self._calib_status_label = None
+        self._calib_countdown_label = None
         self.resize(_GAME_W, _GAME_H + 40)
         if score > self._high_score:
             self._high_score = score
@@ -678,19 +730,36 @@ class MainWindow(QtWidgets.QMainWindow):
         screen.restart.connect(self._show_calibration)
         screen.go_home.connect(self._show_home)
         self.setCentralWidget(screen)
+        self.setFocus()
 
     def _calibration_tick(self):
         update = self.controller.process_eeg()
 
         if update is not None:
             self._eeg_curve.setData(update.rel_times, update.signal)
-            if update.status_text:
+            if update.status_text and self.controller.mode == 1 and self._calib_status_label is not None:
+                self._calib_status_label.setText(update.status_text)
+            elif update.status_text:
                 self._calib_screen.set_status(update.status_text)
 
         if self.controller.mode == 1:
             elapsed = time.monotonic() - self._calib_start
             remaining = max(0, int(self.controller.calibration_duration - elapsed))
-            self._calib_screen.set_remaining(remaining)
+            if self._calib_countdown_label is not None:
+                self._calib_countdown_label.setText(f"{remaining}s remaining")
+
+            detected = int(getattr(self.controller, "calib_detected", 0))
+            if detected > getattr(self, "_last_calib_detected", 0) and self._calib_bird is not None:
+                self._calib_bird.jump()
+            self._last_calib_detected = detected
+
+            if self._calib_bird is not None and self._calib_practice_screen is not None:
+                self._calib_bird.update()
+                self._calib_bird.y = max(0, min(_GAME_H, self._calib_bird.y))
+                self._calib_practice_screen.update_bird(
+                    self._calib_bird.y,
+                    self._calib_bird.vel,
+                )
         else:
             self._calib_screen.set_remaining(None)
 
@@ -762,13 +831,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if not status_text:
             return
 
-        if hasattr(self, "_calib_screen"):
+        if getattr(self, "_calib_screen", None) is not None:
             self._calib_screen.set_status(status_text)
+        elif getattr(self, "_calib_status_label", None) is not None:
+            self._calib_status_label.setText(status_text)
         if hasattr(self, "_status_label"):
             self._refresh_status_label(status_text)
 
     def _refresh_status_label(self, controller_text: str | None = None):
-        if not hasattr(self, "_status_label"):
+        if not hasattr(self, "_status_label") or self._status_label is None:
+            return
+        if sip.isdeleted(self._status_label):
+            self._status_label = None
             return
 
         parts = [f"Score: {getattr(self, '_score', 0)}"]
@@ -776,7 +850,10 @@ class MainWindow(QtWidgets.QMainWindow):
             controller_text = self.controller.status_text
         if controller_text:
             parts.append(controller_text)
-        self._status_label.setText("  |  ".join(parts))
+        try:
+            self._status_label.setText("  |  ".join(parts))
+        except RuntimeError:
+            self._status_label = None
 
     def _stop_timers(self):
         for timer in (self._eeg_timer, self._game_timer, self._dot_timer):
