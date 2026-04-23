@@ -616,6 +616,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._high_score = _load_high_score()
 
         self._mode = None
+        self._paused = False
         self._bird_tuning: dict[int, dict[str, float]] = {}
         self._eeg_timer = QtCore.QTimer(self)
         self._game_timer = QtCore.QTimer(self)
@@ -626,7 +627,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_home(self):
         self._stop_timers()
+        self._paused = False
         self._status_label = None
+        self._pause_label = None
         self._calib_screen = None
         self._calib_status_label = None
         self._calib_countdown_label = None
@@ -723,7 +726,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_calibration(self):
         self._stop_timers()
+        self._paused = False
         self._status_label = None
+        self._pause_label = None
         self.controller = EEGController(self._mode)
         self.setWindowTitle(self.controller.window_title)
         self.resize(_GAME_W * 2 + 20, _GAME_H + 40)
@@ -825,6 +830,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_play(self):
         self._stop_timers()
+        self._paused = False
         self._calib_screen = None
         self._calib_status_label = None
         self._calib_countdown_label = None
@@ -857,6 +863,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_label = QtWidgets.QLabel("")
         self._status_label.setStyleSheet("font-size: 14px; padding: 4px;")
         layout.addWidget(self._status_label)
+
+        self._pause_label = QtWidgets.QLabel("Paused  |  Press SPACE to resume")
+        self._pause_label.setAlignment(QtCore.Qt.AlignCenter)
+        self._pause_label.setStyleSheet(
+            "font-size: 16px; font-weight: bold; color: white; "
+            "background: rgba(16, 22, 31, 235); padding: 10px; border-radius: 12px;"
+        )
+        self._pause_label.hide()
+        layout.addWidget(self._pause_label)
+
         self._refresh_status_label()
         layout.addWidget(self._build_physics_controls())
 
@@ -873,7 +889,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_game_over(self, score: int):
         self._stop_timers()
+        self._paused = False
         self._status_label = None
+        self._pause_label = None
         self._calib_screen = None
         self._calib_status_label = None
         self._calib_countdown_label = None
@@ -940,10 +958,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._eeg_curve.setData(update.rel_times, update.signal)
         self._refresh_status_label(update.status_text)
 
-        if update.jump_now:
+        if update.jump_now and not self._paused:
             self._bird.jump()
 
     def _game_tick(self):
+        if self._paused:
+            return
+
         if self.controller.consume_held_jump():
             self._bird.jump()
 
@@ -1015,6 +1036,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         parts = [f"Score: {getattr(self, '_score', 0)}"]
+        if self._paused:
+            parts.append("PAUSED")
         if controller_text is None and hasattr(self, "controller"):
             controller_text = self.controller.status_text
         if controller_text:
@@ -1024,10 +1047,28 @@ class MainWindow(QtWidgets.QMainWindow):
         except RuntimeError:
             self._status_label = None
 
+    def _toggle_pause(self):
+        if not hasattr(self, "controller") or self.controller is None:
+            return
+        if self.controller.calibrating or not hasattr(self, "_bird"):
+            return
+
+        self._paused = not self._paused
+        if getattr(self, "_pause_label", None) is not None:
+            self._pause_label.setVisible(self._paused)
+        self._refresh_status_label()
+
     def _stop_timers(self):
         for timer in (self._eeg_timer, self._game_timer, self._dot_timer):
             if timer.isActive():
                 timer.stop()
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Space:
+            self._toggle_pause()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 if __name__ == "__main__":
