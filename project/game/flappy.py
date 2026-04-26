@@ -1,6 +1,6 @@
 # game/flappy.py
 class Bird:
-    def __init__(self, y, gravity=0.5, jump=11):
+    def __init__(self, y, gravity=0.45, jump=10.5):
         self.y = y
         self.vel = 0
         self.gravity = gravity
