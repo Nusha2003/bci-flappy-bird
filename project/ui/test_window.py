@@ -1,5 +1,6 @@
 import json
 import random
+import re
 import time
 from pathlib import Path
 
@@ -348,6 +349,25 @@ class CalibrationScreen(_BgWidget):
         )
         layout.addWidget(instr)
 
+        self._cue = QtWidgets.QLabel("")
+        self._cue.setAlignment(QtCore.Qt.AlignCenter)
+        self._cue.setWordWrap(True)
+        self._cue.setVisible(self._ctrl.mode == 2)
+        self._cue.setStyleSheet(
+            "color: white; background: rgba(242, 160, 7, 0.20); "
+            "padding: 20px; border-radius: 18px; font-size: 28px; font-weight: bold;"
+        )
+        layout.addWidget(self._cue)
+
+        self._cue_detail = QtWidgets.QLabel("")
+        self._cue_detail.setAlignment(QtCore.Qt.AlignCenter)
+        self._cue_detail.setWordWrap(True)
+        self._cue_detail.setVisible(self._ctrl.mode == 2)
+        self._cue_detail.setStyleSheet(
+            "color: #d5dde8; background: transparent; font-size: 14px; font-weight: bold;"
+        )
+        layout.addWidget(self._cue_detail)
+
         self._status = QtWidgets.QLabel(self._ctrl.status_text)
         self._status.setAlignment(QtCore.Qt.AlignCenter)
         self._status.setWordWrap(True)
@@ -368,6 +388,8 @@ class CalibrationScreen(_BgWidget):
         layout.addWidget(self._countdown, alignment=QtCore.Qt.AlignCenter)
         layout.addStretch(1)
 
+        self.set_status(self._ctrl.status_text)
+
     def paintEvent(self, event):
         del event
         painter = QtGui.QPainter(self)
@@ -376,12 +398,54 @@ class CalibrationScreen(_BgWidget):
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
+        if self._ctrl.mode == 2:
+            self._update_jaw_cue(text)
 
     def set_remaining(self, remaining: int | None) -> None:
         if remaining is None:
             self._countdown.setText("")
         else:
             self._countdown.setText(f"{remaining}s remaining")
+
+    def _update_jaw_cue(self, text: str) -> None:
+        cue = "GET READY"
+        detail = "Follow the on-screen prompt."
+        style = (
+            "color: white; background: rgba(120, 130, 150, 0.18); "
+            "padding: 20px; border-radius: 18px; font-size: 28px; font-weight: bold;"
+        )
+
+        match = re.search(r"(REST|JAW CLENCH):\s*([^|]+)$", text)
+        if match:
+            cue = match.group(1)
+            phase = match.group(2).strip().upper()
+            detail = phase.replace("GET READY", "GET READY").replace("HOLD STEADY", "HOLD STEADY")
+        elif "training model" in text.lower():
+            cue = "TRAINING"
+            detail = "Building your jaw-clench model."
+        elif "jaw calibration" in text.lower():
+            cue = "GET READY"
+            detail = "Calibration is about to begin."
+
+        if cue == "REST":
+            style = (
+                "color: white; background: rgba(39, 174, 96, 0.26); "
+                "padding: 20px; border-radius: 18px; font-size: 30px; font-weight: bold;"
+            )
+        elif cue == "JAW CLENCH":
+            style = (
+                "color: white; background: rgba(242, 160, 7, 0.28); "
+                "padding: 20px; border-radius: 18px; font-size: 30px; font-weight: bold;"
+            )
+        elif cue == "TRAINING":
+            style = (
+                "color: white; background: rgba(80, 120, 220, 0.24); "
+                "padding: 20px; border-radius: 18px; font-size: 28px; font-weight: bold;"
+            )
+
+        self._cue.setText(cue)
+        self._cue.setStyleSheet(style)
+        self._cue_detail.setText(detail)
 
 
 class PlayScreen(QtWidgets.QWidget):
