@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from eeg.blink_detector import BlinkDetector
-from eeg.hand_clench_detector import HandClenchDetector
 from eeg.ml_jaw_clench_detector import MLJawClenchDetector
 from eeg.preprocess import preprocess, smooth_signal
 from eeg.stream import EEGStream
@@ -22,13 +21,14 @@ class ControllerUpdate:
 class EEGController:
     def __init__(self, mode: int):
         self.mode = mode
+        if self.mode not in (1, 2):
+            raise ValueError(f"Unsupported EEG mode: {self.mode}")
         self.stream = EEGStream()
 
         self.plot_duration = 2
 
         self.blink_thresh_min = 70.0
         self.jaw_thresh_min = 0.2
-        self.hand_thresh_min = 0.2
         self.blink_veto_thresh = 70.0
 
         self.buffer = deque(maxlen=int(self.stream.fs * 5))
@@ -42,13 +42,6 @@ class EEGController:
         self.calibration_start_time = None
         self.calib_dot_count = 0
         self.calib_detected = 0
-
-        self.hand_calibration_target = 20
-        self.hand_calibration_samples_per_phase = int(self.stream.fs * 3.0)
-        self.hand_calibration_phase = "rest"
-        self.hand_phase_buffer = []
-        self.hand_rest_segments = []
-        self.hand_clench_segments = []
 
         self.jaw_calibration_target = 5
         self.jaw_calibration_prepare_seconds = 1.5
@@ -93,29 +86,18 @@ class EEGController:
         if not self.jaw_channel_indices:
             self.jaw_channel_indices = [self.plot_channel_index]
 
-        self.hand_channel_indices = self._resolve_channel_indices(
-            ["F4", "C4", "P4", "P3", "C3", "F3"]
-        )
-        if not self.hand_channel_indices:
-            self.hand_channel_indices = self.signal_channel_indices
-
         if self.mode == 1:
             self.detector = BlinkDetector(self.stream.fs)
             self.blink_veto_detector = None
             self.window_title = "EEG Eye Blink Flappy Bird"
             self.control_channel_indices = self.blink_channel_indices
-        elif self.mode == 2:
+        else:
             jaw_names = [self.stream.ch_names[idx] for idx in self.jaw_channel_indices]
             self.detector = MLJawClenchDetector(self.stream.fs, channel_names=jaw_names)
             self.blink_veto_detector = BlinkDetector(self.stream.fs)
             self.window_title = "EEG Jaw Clench Flappy Bird"
             self.control_channel_indices = self.jaw_channel_indices
             self._reset_jaw_calibration_trials()
-        else:
-            self.detector = HandClenchDetector(self.stream.fs)
-            self.blink_veto_detector = None
-            self.window_title = "EEG Hand Clench Flappy Bird"
-            self.control_channel_indices = self.hand_channel_indices
 
         self.status_text = self._build_calibration_status()
 
@@ -138,9 +120,6 @@ class EEGController:
 
         if self.mode == 2 and self.calibrating:
             self._run_jaw_calibration(chunk[:, self.control_channel_indices], ts)
-
-        if self.mode == 3 and self.calibrating:
-            self._run_hand_calibration(chunk[:, self.control_channel_indices])
 
         if len(self.buffer) < int(self.stream.fs):
             return None
@@ -176,7 +155,7 @@ class EEGController:
         elif self.mode == 2:
             jump_now = self._handle_jaw(control_signal, times, blink_events)
         else:
-            jump_now = self._handle_hand(control_signal, times)
+            jump_now = self._handle_jaw(control_signal, times, blink_events)
 
         return ControllerUpdate(
             rel_times=times - times[-1],
@@ -187,7 +166,7 @@ class EEGController:
 
     def consume_held_jump(self) -> bool:
         now = time.monotonic()
-        if self.mode not in (2, 3) or self.calibrating:
+        if self.mode != 2 or self.calibrating:
             return False
         if now >= self.clench_hold_until:
             return False
@@ -200,11 +179,7 @@ class EEGController:
     def _calibration_instruction(self) -> str:
         if self.mode == 1:
             return "Blink once or twice when prompted; keep your jaw relaxed."
-        if self.mode == 2:
-            return "Clench steadily when prompted; try not to blink during calibration."
-        if self.hand_calibration_phase == "rest":
-            return "REST: relax your hand and stay still."
-        return "CLENCH: make a firm hand clench."
+        return "Clench steadily when prompted; try not to blink during calibration."
 
     def _build_calibration_status(self) -> str:
         dots = "." * self.calib_dot_count
@@ -237,14 +212,7 @@ class EEGController:
                 f"{cue}: {phase_text}"
             )
 
-        rest_done = len(self.hand_rest_segments)
-        clench_done = len(self.hand_clench_segments)
-        cue = "REST" if self.hand_calibration_phase == "rest" else "CLENCH"
-        return (
-            f"Hand calibration{dots}{pad}  - cue: {cue}  |  "
-            f"rest {rest_done}/{self.hand_calibration_target}  |  "
-            f"clench {clench_done}/{self.hand_calibration_target}  |  {instruction}"
-        )
+        return f"Jaw calibration{dots}{pad}  |  {instruction}"
 
     def _build_ready_status(self) -> str:
         if self.mode == 1:
@@ -255,10 +223,7 @@ class EEGController:
                 "Calibration complete! Clench to flap.  |  "
                 f"Jaw model train acc: {train_acc:.2f}"
             )
-        return (
-            "Calibration complete! Hand clench to flap.  |  "
-            "Use firm hand clenches to jump."
-        )
+        return "Calibration complete! Clench to flap."
 
     def _run_single_channel_calibration(
         self,
@@ -369,46 +334,6 @@ class EEGController:
             self.status_text = self._build_calibration_status()
             return
 
-    def _run_hand_calibration(self, chunk: np.ndarray) -> None:
-        for sample in chunk:
-            self.hand_phase_buffer.append(sample)
-            if len(self.hand_phase_buffer) < self.hand_calibration_samples_per_phase:
-                continue
-
-            segment = np.asarray(self.hand_phase_buffer, dtype=float)
-            self.hand_phase_buffer = []
-
-            if self.hand_calibration_phase == "rest":
-                self.hand_rest_segments.append(segment)
-                self.hand_calibration_phase = "clench"
-            else:
-                self.hand_clench_segments.append(segment)
-                self.hand_calibration_phase = "rest"
-
-            self.status_text = self._build_calibration_status()
-
-            if len(self.hand_rest_segments) >= self.hand_calibration_target and len(
-                self.hand_clench_segments
-            ) >= self.hand_calibration_target:
-                break
-
-        if len(self.hand_rest_segments) < self.hand_calibration_target:
-            return
-        if len(self.hand_clench_segments) < self.hand_calibration_target:
-            return
-
-        rest_signal = np.concatenate(self.hand_rest_segments, axis=0)
-        clench_signal = np.concatenate(self.hand_clench_segments, axis=0)
-
-        if hasattr(self.detector, "calibrate"):
-            try:
-                self.detector.calibrate(clench_signal, rest_signal)
-            except Exception:
-                pass
-
-        self.calibrating = False
-        self.status_text = self._build_ready_status()
-
     def _handle_blink(self, signal: np.ndarray, times: np.ndarray) -> bool:
         _, blinks = self.detector.detect(signal, times, self.blink_thresh_min)
         if not blinks:
@@ -445,18 +370,6 @@ class EEGController:
         if isinstance(info, dict):
             prob = float(info.get("probability", 0.0))
         self.status_text = f"Jaw clenches: {self.event_count}  |  clench prob: {prob:.2f}"
-        self.clench_hold_until = now + self.hold_seconds
-        return False
-
-    def _handle_hand(self, signal: np.ndarray, times: np.ndarray) -> bool:
-        now = time.monotonic()
-
-        _, clenches, _ = self.detector.detect(signal, times, self.hand_thresh_min)
-        if not clenches:
-            return False
-
-        self.event_count += len(clenches)
-        self.status_text = f"Hand clenches: {self.event_count}"
         self.clench_hold_until = now + self.hold_seconds
         return False
 

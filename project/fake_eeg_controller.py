@@ -2,6 +2,7 @@ import time
 import numpy as np
 
 from controller import ControllerUpdate
+from eeg.preprocess import smooth_signal
 
 
 class FakeEEGController:
@@ -129,11 +130,11 @@ class FakeEEGController:
         t = np.linspace(now - self.plot_duration, now, samples)
 
         base = (
-            18.0 * np.sin(2 * np.pi * 1.4 * t)
-            + 9.0 * np.sin(2 * np.pi * 3.2 * t + 0.7)
-            + 3.0 * np.sin(2 * np.pi * 8.0 * t + 1.1)
+            14.0 * np.sin(2 * np.pi * 1.15 * t)
+            + 6.0 * np.sin(2 * np.pi * 2.4 * t + 0.7)
+            + 1.8 * np.sin(2 * np.pi * 6.0 * t + 1.1)
         )
-        noise = np.random.normal(0.0, 4.0, size=samples)
+        noise = np.random.normal(0.0, 1.6, size=samples)
         signal = base + noise
 
         active_events = [event_t for event_t in self._manual_event_times if now - event_t < 2.0]
@@ -150,6 +151,7 @@ class FakeEEGController:
                 center = now - 0.25
                 signal += amplitude * np.exp(-0.5 * ((t - center) / width) ** 2)
 
+        signal = smooth_signal(signal, self.fs, window_ms=120)
         return signal.astype(float)
 
     def _build_calibration_status(self) -> str:

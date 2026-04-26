@@ -282,7 +282,7 @@ class ModeSelectScreen(QtWidgets.QWidget):
 
         layout.addSpacing(8)
 
-        for label, mode in [("Jaw Clench", 2), ("Fist Clench", 3), ("Eye Blink", 1)]:
+        for label, mode in [("Jaw Clench", 2), ("Eye Blink", 1)]:
             item = _MenuItem(label)
             item.clicked.connect(lambda _checked=False, m=mode: self.mode_selected.emit(m))
             layout.addWidget(item, alignment=QtCore.Qt.AlignCenter)
@@ -325,8 +325,11 @@ class CalibrationScreen(_BgWidget):
                 "or extra facial movement between trials."
             )
         else:
-            headline = "Hand Clench Calibration"
-            detail = "Follow the REST and CLENCH prompts and stay still otherwise."
+            headline = "Jaw Clench Calibration"
+            detail = (
+                "Clench only when prompted. Relax your jaw and avoid blinking "
+                "or extra facial movement between trials."
+            )
 
         headline_label = QtWidgets.QLabel(headline)
         headline_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -445,16 +448,16 @@ class PlayScreen(QtWidgets.QWidget):
         ).scaled(_GAME_W, _GAME_H, ign, smooth)
         bird_pix = _load_pixmap(
             "flappybird.png",
-            (34, 24),
+            (40, 28),
             QtGui.QColor(255, 220, 0),
-        ).scaled(34, 24, keep, smooth)
+        ).scaled(40, 28, keep, smooth)
 
         bg_item = QtWidgets.QGraphicsPixmapItem(bg_pix)
         bg_item.setZValue(-10)
         self._scene.addItem(bg_item)
 
         self._bird_item = QtWidgets.QGraphicsPixmapItem(bird_pix)
-        self._bird_item.setOffset(-17, -12)
+        self._bird_item.setOffset(-20, -14)
         self._bird_item.setZValue(10)
         self._scene.addItem(self._bird_item)
         self._bird_x = 80
@@ -649,9 +652,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _default_bird_physics(self, mode: int) -> dict[str, float]:
         if mode == 1:
             return {"gravity": 0.46, "jump": 9.5}
-        if mode == 2:
-            return {"gravity": 0.52, "jump": 12.0}
-        return {"gravity": 0.5, "jump": 11.0}
+        return {"gravity": 0.52, "jump": 12.0}
 
     def _bird_physics(self) -> dict[str, float]:
         if self._mode not in self._bird_tuning:
@@ -1064,6 +1065,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 timer.stop()
 
     def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_P:
+            self._toggle_pause()
+            event.accept()
+            return
+
         if event.key() == QtCore.Qt.Key_Space:
             self._toggle_pause()
             event.accept()
